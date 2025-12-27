@@ -35,7 +35,7 @@ name = "cloudflare-speed-cli"
 path = "src/main.rs"
 
 [features]
-default = []
+default = ["tui"]
 tui = ["dep:ratatui", "dep:crossterm", "dep:arboard"]
 
 [package.metadata.deb]

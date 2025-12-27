@@ -1347,7 +1347,17 @@ fn copy_to_clipboard(text: &str) -> Result<()> {
 
 fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
     let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from("Most recent runs (↑/↓/j/k: navigate, d: delete):"));
+    lines.push(Line::from(vec![
+        Span::raw("Most recent runs ("),
+        Span::styled("↑/↓/j/k", Style::default().fg(Color::Magenta)),
+        Span::raw(": navigate, "),
+        Span::styled("d", Style::default().fg(Color::Magenta)),
+        Span::raw(": delete, "),
+        Span::styled("e", Style::default().fg(Color::Magenta)),
+        Span::raw(": export JSON, "),
+        Span::styled("c", Style::default().fg(Color::Magenta)),
+        Span::raw(": export CSV):"),
+    ]));
     lines.push(Line::from(""));
     
     // Calculate how many items can fit in the available area
@@ -1460,10 +1470,88 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
     // Show exported path if available
     if let Some(ref path) = state.last_exported_path {
         lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled("Last exported: ", Style::default().fg(Color::Gray)),
-            Span::styled(path, Style::default().fg(Color::Cyan)),
-        ]));
+        
+        // Wrap long paths to fit within the available width
+        // Account for borders (2 chars on each side)
+        let available_width = area.width.saturating_sub(4); // borders
+        let prefix = "Last exported: ";
+        let prefix_len = prefix.chars().count() as u16;
+        let max_path_width = available_width.saturating_sub(prefix_len);
+        
+        // Split path into chunks that fit
+        let path_str = path.as_str();
+        let mut remaining = path_str;
+        let mut is_first_line = true;
+        
+        while !remaining.is_empty() {
+            let line_width = if is_first_line {
+                // First line can use less width since we have the prefix
+                max_path_width.max(1)
+            } else {
+                // Subsequent lines can use full width (with 2 char indent)
+                available_width.saturating_sub(2).max(1)
+            };
+            
+            let remaining_chars = remaining.chars().count() as u16;
+            if remaining_chars <= line_width {
+                // Entire remaining path fits
+                if is_first_line {
+                    lines.push(Line::from(vec![
+                        Span::styled(prefix, Style::default().fg(Color::Gray)),
+                        Span::styled(remaining, Style::default().fg(Color::Cyan)),
+                    ]));
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled(remaining, Style::default().fg(Color::Cyan)),
+                    ]));
+                }
+                break;
+            } else {
+                // Need to split - find a good break point
+                let mut char_count = 0;
+                let mut last_sep_pos = None;
+                let mut break_pos = 0;
+                
+                for (idx, ch) in remaining.char_indices() {
+                    if char_count >= line_width {
+                        break;
+                    }
+                    if ch == '/' || ch == '\\' {
+                        last_sep_pos = Some(idx);
+                    }
+                    break_pos = idx + ch.len_utf8();
+                    char_count += 1;
+                }
+                
+                // Prefer breaking at path separator, otherwise break at line width
+                let split_pos = if let Some(sep_pos) = last_sep_pos {
+                    if sep_pos > 0 {
+                        sep_pos + 1 // Include the separator
+                    } else {
+                        break_pos
+                    }
+                } else {
+                    break_pos
+                };
+                
+                let (chunk, rest) = remaining.split_at(split_pos);
+                if is_first_line {
+                    lines.push(Line::from(vec![
+                        Span::styled(prefix, Style::default().fg(Color::Gray)),
+                        Span::styled(chunk, Style::default().fg(Color::Cyan)),
+                    ]));
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled(chunk, Style::default().fg(Color::Cyan)),
+                    ]));
+                }
+                remaining = rest;
+                is_first_line = false;
+            }
+        }
+        
         lines.push(Line::from(vec![
             Span::styled("Press ", Style::default().fg(Color::Gray)),
             Span::styled("y", Style::default().fg(Color::Magenta)),

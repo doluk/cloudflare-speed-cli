@@ -100,7 +100,13 @@ jobs:
       - name: Build RPM package (Linux x86_64 and ARM64)
         if: matrix.os == 'ubuntu-22.04' && (matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'aarch64-unknown-linux-gnu')
         run: |
-          cargo rpm build --target ${{ matrix.target }} --features tui
+          # cargo-rpm doesn't support --features, so rebuild with features first
+          cargo build --release --features tui --target ${{ matrix.target }}
+          # Now build RPM (it will use the existing binary)
+          cargo rpm build --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
 
       - name: Create archive
         shell: bash
@@ -140,7 +146,14 @@ jobs:
           else
             ARCHIVE_NAME=${{ matrix.bin-name }}-${{ matrix.target }}-v${VERSION}.zip
             cd target/${{ matrix.target }}/release
-            zip ../../../../${ARCHIVE_NAME} ${{ matrix.bin-name }}
+            if command -v zip >/dev/null 2>&1; then
+              zip ../../../../${ARCHIVE_NAME} ${{ matrix.bin-name }}
+            else
+              # Windows: use PowerShell Compress-Archive with absolute paths
+              BIN_PATH=$(pwd)/${{ matrix.bin-name }}
+              ARCHIVE_PATH=$(cd ../../../../ && pwd)/${ARCHIVE_NAME}
+              powershell -Command "Compress-Archive -Path '$BIN_PATH' -DestinationPath '$ARCHIVE_PATH' -Force"
+            fi
             cd ../../..
             ${SHA256_CMD} ${ARCHIVE_NAME} > ${ARCHIVE_NAME}.sha256
           fi
