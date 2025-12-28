@@ -28,7 +28,9 @@ Or for the lazy:
 wget https://github.com/kavehtehrani/cloudflare-speed-cli/releases/latest/download/cloudflare-speed-cli_-x86_64-unknown-linux-musl.tar.xz
 tar -xJf cloudflare-speed-cli_-x86_64-unknown-linux-musl.tar.xz
 sudo mv cloudflare-speed-cli /usr/local/bin/
+```
 
+```bash
 # For ARM64 systems
 wget https://github.com/kavehtehrani/cloudflare-speed-cli/releases/latest/download/cloudflare-speed-cli_-aarch64-unknown-linux-musl.tar.xz
 tar -xJf cloudflare-speed-cli_-aarch64-unknown-linux-musl.tar.xz
@@ -42,7 +44,9 @@ sudo mv cloudflare-speed-cli /usr/local/bin/
 wget https://github.com/kavehtehrani/cloudflare-speed-cli/releases/latest/download/cloudflare-speed-cli_-x86_64-apple-darwin.tar.xz
 tar -xJf cloudflare-speed-cli_-x86_64-apple-darwin.tar.xz
 sudo mv cloudflare-speed-cli /usr/local/bin/
+```
 
+```bash
 # For Apple Silicon (M1/M2/M3)
 wget https://github.com/kavehtehrani/cloudflare-speed-cli/releases/latest/download/cloudflare-speed-cli_-aarch64-apple-darwin.tar.xz
 tar -xJf cloudflare-speed-cli_-aarch64-apple-darwin.tar.xz
