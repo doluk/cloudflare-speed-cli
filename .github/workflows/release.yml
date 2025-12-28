@@ -102,8 +102,9 @@ jobs:
         run: |
           # cargo-rpm doesn't support --features, so rebuild with features first
           cargo build --release --features tui --target ${{ matrix.target }}
-          # Now build RPM (it will use the existing binary)
-          cargo rpm build --target ${{ matrix.target }}
+          # Build RPM without --target since we're on native platform
+          # cargo-rpm will auto-detect the target from the built binary
+          cargo rpm build
 
       - name: Create archive
         shell: bash
