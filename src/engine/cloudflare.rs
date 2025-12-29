@@ -41,7 +41,11 @@ impl CloudflareClient {
         self.base_url.join("/__turn").expect("join __turn")
     }
 
-    pub async fn probe_latency_ms(&self, during: Option<&str>, timeout_ms: u64) -> Result<(f64, Option<serde_json::Value>)> {
+    pub async fn probe_latency_ms(
+        &self,
+        during: Option<&str>,
+        timeout_ms: u64,
+    ) -> Result<(f64, Option<serde_json::Value>)> {
         let mut url = self.down_url();
         {
             let mut qp = url.query_pairs_mut();
@@ -60,11 +64,11 @@ impl CloudflareClient {
             .timeout(Duration::from_millis(timeout_ms))
             .send()
             .await?;
-        
+
         // Extract meta from headers before consuming body
         let meta = self.extract_meta_from_response(&resp);
         let has_meta = !meta.as_object().map(|m| m.is_empty()).unwrap_or(true);
-        
+
         // Consume body to keep behavior consistent
         let _ = resp.bytes().await;
         let elapsed = start.elapsed().as_secs_f64() * 1000.0;
@@ -73,57 +77,99 @@ impl CloudflareClient {
 
     pub fn extract_meta_from_response(&self, resp: &reqwest::Response) -> serde_json::Value {
         let mut meta = serde_json::Map::new();
-        
+
         // Extract from cf-meta-* headers (preferred, contains all info)
-        if let Some(ip) = resp.headers().get("cf-meta-ip")
-            .and_then(|h| h.to_str().ok()) {
-            meta.insert("clientIp".to_string(), serde_json::Value::String(ip.to_string()));
+        if let Some(ip) = resp
+            .headers()
+            .get("cf-meta-ip")
+            .and_then(|h| h.to_str().ok())
+        {
+            meta.insert(
+                "clientIp".to_string(),
+                serde_json::Value::String(ip.to_string()),
+            );
         }
-        
-        if let Some(colo) = resp.headers().get("cf-meta-colo")
-            .and_then(|h| h.to_str().ok()) {
-            meta.insert("colo".to_string(), serde_json::Value::String(colo.to_string()));
+
+        if let Some(colo) = resp
+            .headers()
+            .get("cf-meta-colo")
+            .and_then(|h| h.to_str().ok())
+        {
+            meta.insert(
+                "colo".to_string(),
+                serde_json::Value::String(colo.to_string()),
+            );
         }
-        
-        if let Some(city) = resp.headers().get("cf-meta-city")
-            .and_then(|h| h.to_str().ok()) {
-            meta.insert("city".to_string(), serde_json::Value::String(city.to_string()));
+
+        if let Some(city) = resp
+            .headers()
+            .get("cf-meta-city")
+            .and_then(|h| h.to_str().ok())
+        {
+            meta.insert(
+                "city".to_string(),
+                serde_json::Value::String(city.to_string()),
+            );
         }
-        
-        if let Some(country) = resp.headers().get("cf-meta-country")
-            .and_then(|h| h.to_str().ok()) {
-            meta.insert("country".to_string(), serde_json::Value::String(country.to_string()));
+
+        if let Some(country) = resp
+            .headers()
+            .get("cf-meta-country")
+            .and_then(|h| h.to_str().ok())
+        {
+            meta.insert(
+                "country".to_string(),
+                serde_json::Value::String(country.to_string()),
+            );
         }
-        
-        if let Some(asn) = resp.headers().get("cf-meta-asn")
-            .and_then(|h| h.to_str().ok()) {
+
+        if let Some(asn) = resp
+            .headers()
+            .get("cf-meta-asn")
+            .and_then(|h| h.to_str().ok())
+        {
             // Try parsing as number first, fall back to string
             if let Ok(asn_num) = asn.parse::<i64>() {
                 meta.insert("asn".to_string(), serde_json::Value::Number(asn_num.into()));
             } else {
-                meta.insert("asn".to_string(), serde_json::Value::String(asn.to_string()));
+                meta.insert(
+                    "asn".to_string(),
+                    serde_json::Value::String(asn.to_string()),
+                );
             }
         }
-        
+
         // Fallback to CF-Connecting-IP and CF-RAY if cf-meta-* headers not available
         if !meta.contains_key("clientIp") {
-            if let Some(ip) = resp.headers().get("cf-connecting-ip")
+            if let Some(ip) = resp
+                .headers()
+                .get("cf-connecting-ip")
                 .or_else(|| resp.headers().get("CF-Connecting-IP"))
-                .and_then(|h| h.to_str().ok()) {
-                meta.insert("clientIp".to_string(), serde_json::Value::String(ip.to_string()));
+                .and_then(|h| h.to_str().ok())
+            {
+                meta.insert(
+                    "clientIp".to_string(),
+                    serde_json::Value::String(ip.to_string()),
+                );
             }
         }
-        
+
         if !meta.contains_key("colo") {
-            if let Some(ray) = resp.headers().get("cf-ray")
+            if let Some(ray) = resp
+                .headers()
+                .get("cf-ray")
                 .or_else(|| resp.headers().get("CF-RAY"))
-                .and_then(|h| h.to_str().ok()) {
+                .and_then(|h| h.to_str().ok())
+            {
                 if let Some(colo) = ray.split('-').nth(1) {
-                    meta.insert("colo".to_string(), serde_json::Value::String(colo.to_string()));
+                    meta.insert(
+                        "colo".to_string(),
+                        serde_json::Value::String(colo.to_string()),
+                    );
                 }
             }
         }
-        
+
         serde_json::Value::Object(meta)
     }
 }
@@ -134,13 +180,9 @@ pub async fn fetch_meta_from_response(client: &CloudflareClient) -> Result<serde
     url.query_pairs_mut()
         .append_pair("bytes", "0")
         .append_pair("measId", &client.meas_id);
-    
-    let resp = client
-        .http
-        .get(url)
-        .send()
-        .await?;
-    
+
+    let resp = client.http.get(url).send().await?;
+
     Ok(client.extract_meta_from_response(&resp))
 }
 
@@ -192,14 +234,16 @@ pub async fn fetch_turn(client: &CloudflareClient) -> Result<TurnInfo> {
 pub async fn fetch_meta(client: &CloudflareClient) -> Result<serde_json::Value> {
     let mut url = client.base_url.join("/meta").context("join /meta")?;
     // Try with measId parameter
-    url.query_pairs_mut()
-        .append_pair("measId", &client.meas_id);
+    url.query_pairs_mut().append_pair("measId", &client.meas_id);
     let v: serde_json::Value = client.http.get(url).send().await?.json().await?;
     Ok(v)
 }
 
 pub async fn fetch_locations(client: &CloudflareClient) -> Result<serde_json::Value> {
-    let url = client.base_url.join("/locations").context("join /locations")?;
+    let url = client
+        .base_url
+        .join("/locations")
+        .context("join /locations")?;
     let v: serde_json::Value = client.http.get(url).send().await?.json().await?;
     Ok(v)
 }
@@ -272,4 +316,3 @@ pub fn map_colo_to_server(locations: &serde_json::Value, colo: &str) -> Option<S
         Some(colo.to_string())
     }
 }
-

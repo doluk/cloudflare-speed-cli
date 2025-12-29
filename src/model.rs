@@ -30,7 +30,9 @@ pub enum Phase {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TestEvent {
-    PhaseStarted { phase: Phase },
+    PhaseStarted {
+        phase: Phase,
+    },
     LatencySample {
         phase: Phase,
         during: Option<Phase>,
@@ -42,8 +44,12 @@ pub enum TestEvent {
         bytes_total: u64,
         bps_instant: f64,
     },
-    Info { message: String },
-    MetaInfo { meta: serde_json::Value },
+    Info {
+        message: String,
+    },
+    MetaInfo {
+        meta: serde_json::Value,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,5 +121,3 @@ pub struct RunResult {
     #[serde(default)]
     pub link_speed_mbps: Option<u64>,
 }
-
-

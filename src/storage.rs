@@ -30,9 +30,7 @@ pub fn save_run(result: &RunResult) -> Result<PathBuf> {
 
 pub fn get_run_path(result: &RunResult) -> Result<PathBuf> {
     let ts = &result.timestamp_utc;
-    let safe_ts = ts
-        .replace(':', "-")
-        .replace('T', "_");
+    let safe_ts = ts.replace(':', "-").replace('T', "_");
     Ok(runs_dir().join(format!("run-{safe_ts}-{}.json", result.meas_id)))
 }
 
@@ -116,11 +114,9 @@ pub fn load_recent(limit: usize) -> Result<Vec<RunResult>> {
     let mut out = Vec::new();
     for (_, p) in entries.into_iter().take(limit) {
         let data = std::fs::read(&p).with_context(|| format!("read {}", p.display()))?;
-        let r: RunResult = serde_json::from_slice(&data).with_context(|| format!("parse {}", p.display()))?;
+        let r: RunResult =
+            serde_json::from_slice(&data).with_context(|| format!("parse {}", p.display()))?;
         out.push(r);
     }
     Ok(out)
 }
-
-
-

@@ -17,8 +17,8 @@ use ratatui::{
     widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph, Sparkline, Tabs},
     Terminal,
 };
-use std::{io, time::Duration, time::Instant};
 use std::process::Command;
+use std::{io, time::Duration, time::Instant};
 use tokio::sync::mpsc;
 
 struct UiState {
@@ -178,7 +178,8 @@ impl UiState {
 
         // Compute jitter (stddev) from samples
         let mean = samples.iter().sum::<f64>() / samples.len() as f64;
-        let variance = samples.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / samples.len() as f64;
+        let variance =
+            samples.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / samples.len() as f64;
         let jitter_ms = Some(variance.sqrt());
 
         // Use HDRHistogram for percentiles
@@ -203,10 +204,16 @@ impl UiState {
 }
 
 /// Gather network interface information
-fn gather_network_info() -> (Option<String>, Option<String>, Option<bool>, Option<String>, Option<u64>) {
+fn gather_network_info() -> (
+    Option<String>,
+    Option<String>,
+    Option<bool>,
+    Option<String>,
+    Option<u64>,
+) {
     // Get default interface by trying to connect to a remote address
     let interface_name = get_default_interface();
-    
+
     if let Some(ref iface) = interface_name {
         let is_wireless = check_if_wireless(iface);
         let network_name = if is_wireless.unwrap_or(false) {
@@ -234,16 +241,16 @@ fn get_default_interface() -> Option<String> {
             for line in output_str.lines() {
                 if let Some(dev_pos) = line.find("dev ") {
                     let rest = &line[dev_pos + 4..];
-                    if let Some(space_pos) = rest.find(' ') {
-                        return Some(rest[..space_pos].to_string());
+                    return if let Some(space_pos) = rest.find(' ') {
+                        Some(rest[..space_pos].to_string())
                     } else {
-                        return Some(rest.to_string());
+                        Some(rest.to_string())
                     }
                 }
             }
         }
     }
-    
+
     // Fallback: try to find first non-loopback interface
     if let Ok(entries) = std::fs::read_dir("/sys/class/net") {
         for entry in entries.flatten() {
@@ -254,7 +261,7 @@ fn get_default_interface() -> Option<String> {
             }
         }
     }
-    
+
     None
 }
 
@@ -268,11 +275,7 @@ fn check_if_wireless(iface: &str) -> Option<bool> {
 /// Get wireless SSID for an interface
 fn get_wireless_ssid(iface: &str) -> Option<String> {
     // Try iwgetid first (most reliable)
-    if let Ok(output) = Command::new("iwgetid")
-        .arg("-r")
-        .arg(iface)
-        .output()
-    {
+    if let Ok(output) = Command::new("iwgetid").arg("-r").arg(iface).output() {
         if let Ok(ssid) = String::from_utf8(output.stdout) {
             let ssid = ssid.trim().to_string();
             if !ssid.is_empty() {
@@ -280,12 +283,9 @@ fn get_wireless_ssid(iface: &str) -> Option<String> {
             }
         }
     }
-    
+
     // Fallback: try iw command
-    if let Ok(output) = Command::new("iw")
-        .args(&["dev", iface, "info"])
-        .output()
-    {
+    if let Ok(output) = Command::new("iw").args(&["dev", iface, "info"]).output() {
         if let Ok(output_str) = String::from_utf8(output.stdout) {
             for line in output_str.lines() {
                 if line.trim().starts_with("ssid ") {
@@ -297,7 +297,7 @@ fn get_wireless_ssid(iface: &str) -> Option<String> {
             }
         }
     }
-    
+
     None
 }
 
@@ -334,9 +334,10 @@ pub async fn run(args: Cli) -> Result<()> {
         ..Default::default()
     };
     state.history = crate::storage::load_recent(20).unwrap_or_default();
-    
+
     // Gather network interface information
-    let (interface_name, network_name, is_wireless, interface_mac, link_speed_mbps) = gather_network_info();
+    let (interface_name, network_name, is_wireless, interface_mac, link_speed_mbps) =
+        gather_network_info();
     state.interface_name = interface_name;
     state.network_name = network_name;
     state.is_wireless = is_wireless;
@@ -662,23 +663,21 @@ fn apply_event(state: &mut UiState, ev: TestEvent) {
                 .get("colo")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            
+
             // Extract ASN and organization
-            state.asn = meta
-                .get("asn")
-                .and_then(|v| {
-                    if let Some(n) = v.as_i64() {
-                        Some(n.to_string())
-                    } else {
-                        v.as_str().map(|s| s.to_string())
-                    }
-                });
+            state.asn = meta.get("asn").and_then(|v| {
+                if let Some(n) = v.as_i64() {
+                    Some(n.to_string())
+                } else {
+                    v.as_str().map(|s| s.to_string())
+                }
+            });
             state.as_org = meta
                 .get("asOrganization")
                 .or_else(|| meta.get("asnOrg"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            
+
             // Extract city for server location (if available, use it directly)
             if let Some(city) = meta.get("city").and_then(|v| v.as_str()) {
                 // If we have city, use it for server location
@@ -693,7 +692,12 @@ fn apply_event(state: &mut UiState, ev: TestEvent) {
                 // which comes from map_colo_to_server
             }
         }
-        TestEvent::LatencySample { phase, during, rtt_ms, ok } => {
+        TestEvent::LatencySample {
+            phase,
+            during,
+            rtt_ms,
+            ok,
+        } => {
             let t = state.run_start.elapsed().as_secs_f64();
             match (phase, during) {
                 (Phase::IdleLatency, _) => {
@@ -707,7 +711,9 @@ fn apply_event(state: &mut UiState, ev: TestEvent) {
                             state.idle_latency_samples.push(ms);
                             // Keep reasonable sample size
                             if state.idle_latency_samples.len() > 10000 {
-                                state.idle_latency_samples.drain(0..(state.idle_latency_samples.len() - 10000));
+                                state
+                                    .idle_latency_samples
+                                    .drain(0..(state.idle_latency_samples.len() - 10000));
                             }
                         }
                     }
@@ -722,7 +728,9 @@ fn apply_event(state: &mut UiState, ev: TestEvent) {
                             UiState::push_point(&mut state.loaded_dl_lat_points, t, ms);
                             state.loaded_dl_latency_samples.push(ms);
                             if state.loaded_dl_latency_samples.len() > 10000 {
-                                state.loaded_dl_latency_samples.drain(0..(state.loaded_dl_latency_samples.len() - 10000));
+                                state
+                                    .loaded_dl_latency_samples
+                                    .drain(0..(state.loaded_dl_latency_samples.len() - 10000));
                             }
                         }
                     }
@@ -737,7 +745,9 @@ fn apply_event(state: &mut UiState, ev: TestEvent) {
                             UiState::push_point(&mut state.loaded_ul_lat_points, t, ms);
                             state.loaded_ul_latency_samples.push(ms);
                             if state.loaded_ul_latency_samples.len() > 10000 {
-                                state.loaded_ul_latency_samples.drain(0..(state.loaded_ul_latency_samples.len() - 10000));
+                                state
+                                    .loaded_ul_latency_samples
+                                    .drain(0..(state.loaded_ul_latency_samples.len() - 10000));
                             }
                         }
                     }
@@ -745,7 +755,11 @@ fn apply_event(state: &mut UiState, ev: TestEvent) {
                 _ => {}
             }
         }
-        TestEvent::ThroughputTick { phase, bytes_total, bps_instant } => {
+        TestEvent::ThroughputTick {
+            phase,
+            bytes_total,
+            bps_instant,
+        } => {
             let mbps = (bps_instant * 8.0) / 1_000_000.0;
             let t = state.run_start.elapsed().as_secs_f64();
             match phase {
@@ -788,9 +802,13 @@ fn draw(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
         Line::from("History"),
         Line::from("Help"),
     ])
-        .select(state.tab)
-        .block(Block::default().borders(Borders::ALL).title("cloudflare-speed-cli"))
-        .highlight_style(Style::default().fg(Color::Yellow));
+    .select(state.tab)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("cloudflare-speed-cli"),
+    )
+    .highlight_style(Style::default().fg(Color::Yellow));
     f.render_widget(tabs, chunks[0]);
 
     match state.tab {
@@ -825,28 +843,30 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
         .split(main[0]);
-    
+
     // Download speed box
-    let dl_info = Paragraph::new(Line::from(vec![
-        Span::styled(format!("inst {:.1} / avg {:.1}", state.dl_mbps, state.dl_avg_mbps), Style::default().fg(Color::Green)),
-    ]))
+    let dl_info = Paragraph::new(Line::from(vec![Span::styled(
+        format!("inst {:.1} / avg {:.1}", state.dl_mbps, state.dl_avg_mbps),
+        Style::default().fg(Color::Green),
+    )]))
     .block(
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Green))
-            .title("Download Speed")
+            .title("Download Speed"),
     );
     f.render_widget(dl_info, speed_row[0]);
-    
+
     // Upload speed box
-    let ul_info = Paragraph::new(Line::from(vec![
-        Span::styled(format!("inst {:.1} / avg {:.1}", state.ul_mbps, state.ul_avg_mbps), Style::default().fg(Color::Cyan)),
-    ]))
+    let ul_info = Paragraph::new(Line::from(vec![Span::styled(
+        format!("inst {:.1} / avg {:.1}", state.ul_mbps, state.ul_avg_mbps),
+        Style::default().fg(Color::Cyan),
+    )]))
     .block(
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Cyan))
-            .title("Upload Speed")
+            .title("Upload Speed"),
     );
     f.render_widget(ul_info, speed_row[1]);
 
@@ -861,10 +881,10 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
         // Calculate x bounds only for download points
         let dl_x_max = state.dl_points.last().map(|(x, _)| *x).unwrap_or(0.0);
         let dl_x_min = state.dl_points.first().map(|(x, _)| *x).unwrap_or(0.0);
-        
+
         let y_dl_max = max_y(&state.dl_points).max(10.0);
         let y_dl_max = (y_dl_max * 1.10).min(10_000.0);
-        
+
         // Use all download points (they're already filtered to download phase)
         let dl_ds = Dataset::default()
             .graph_type(GraphType::Line)
@@ -872,17 +892,21 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
             .style(Style::default().fg(Color::Green))
             .data(&state.dl_points);
         let dl_chart = Chart::new(vec![dl_ds])
-            .block(Block::default().borders(Borders::ALL).title("Download Throughput"))
-            .x_axis(
-                Axis::default()
-                    .bounds([dl_x_min, dl_x_max.max(1.0)]),
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Download Throughput"),
             )
+            .x_axis(Axis::default().bounds([dl_x_min, dl_x_max.max(1.0)]))
             .y_axis(Axis::default().title("Mbps").bounds([0.0, y_dl_max]));
         f.render_widget(dl_chart, thr_row[0]);
     } else {
         // Show empty placeholder when download hasn't started
-        let empty_chart = Paragraph::new("Waiting for download phase...")
-            .block(Block::default().borders(Borders::ALL).title("Download Throughput"));
+        let empty_chart = Paragraph::new("Waiting for download phase...").block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Download Throughput"),
+        );
         f.render_widget(empty_chart, thr_row[0]);
     }
 
@@ -891,10 +915,10 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
         // Calculate x bounds only for upload points
         let ul_x_max = state.ul_points.last().map(|(x, _)| *x).unwrap_or(0.0);
         let ul_x_min = state.ul_points.first().map(|(x, _)| *x).unwrap_or(0.0);
-        
+
         let y_ul_max = max_y(&state.ul_points).max(10.0);
         let y_ul_max = (y_ul_max * 1.10).min(10_000.0);
-        
+
         // Use all upload points (they're already filtered to upload phase)
         let ul_ds = Dataset::default()
             .graph_type(GraphType::Line)
@@ -902,24 +926,35 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
             .style(Style::default().fg(Color::Cyan))
             .data(&state.ul_points);
         let ul_chart = Chart::new(vec![ul_ds])
-            .block(Block::default().borders(Borders::ALL).title("Upload Throughput"))
-            .x_axis(
-                Axis::default()
-                    .bounds([ul_x_min, ul_x_max.max(1.0)]),
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Upload Throughput"),
             )
+            .x_axis(Axis::default().bounds([ul_x_min, ul_x_max.max(1.0)]))
             .y_axis(Axis::default().title("Mbps").bounds([0.0, y_ul_max]));
         f.render_widget(ul_chart, thr_row[1]);
     } else {
         // Show empty placeholder when upload hasn't started
-        let empty_chart = Paragraph::new("Waiting for upload phase...")
-            .block(Block::default().borders(Borders::ALL).title("Upload Throughput"));
+        let empty_chart = Paragraph::new("Waiting for upload phase...").block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Upload Throughput"),
+        );
         f.render_widget(empty_chart, thr_row[1]);
     }
 
     // Latency stats (numeric, not charts): Idle, Loaded DL, Loaded UL
     let lat_row = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(33), Constraint::Percentage(33), Constraint::Percentage(34)].as_ref())
+        .constraints(
+            [
+                Constraint::Percentage(33),
+                Constraint::Percentage(33),
+                Constraint::Percentage(34),
+            ]
+            .as_ref(),
+        )
         .split(main[2]);
 
     // Helper to format latency stats
@@ -959,58 +994,75 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
         ))
     };
     let idle_stats = Paragraph::new(
-        idle_lat.as_ref().map(format_latency).unwrap_or_else(|| {
-            vec![Line::from("Waiting for data...")]
-        })
+        idle_lat
+            .as_ref()
+            .map(format_latency)
+            .unwrap_or_else(|| vec![Line::from("Waiting for data...")]),
     )
     .block(Block::default().borders(Borders::ALL).title("Idle Latency"));
     f.render_widget(idle_stats, lat_row[0]);
 
     // Loaded latency during download stats (live from samples)
-    let dl_loaded_lat = if state.loaded_dl_latency_samples.is_empty() && state.loaded_dl_latency_sent == 0 {
-        None
-    } else {
-        Some(UiState::compute_live_latency_stats(
-            &state.loaded_dl_latency_samples,
-            state.loaded_dl_latency_sent,
-            state.loaded_dl_latency_received,
-        ))
-    };
+    let dl_loaded_lat =
+        if state.loaded_dl_latency_samples.is_empty() && state.loaded_dl_latency_sent == 0 {
+            None
+        } else {
+            Some(UiState::compute_live_latency_stats(
+                &state.loaded_dl_latency_samples,
+                state.loaded_dl_latency_sent,
+                state.loaded_dl_latency_received,
+            ))
+        };
     let dl_loaded_stats = Paragraph::new(
-        dl_loaded_lat.as_ref().map(format_latency).unwrap_or_else(|| {
-            vec![Line::from("Waiting for data...")]
-        })
+        dl_loaded_lat
+            .as_ref()
+            .map(format_latency)
+            .unwrap_or_else(|| vec![Line::from("Waiting for data...")]),
     )
-    .block(Block::default().borders(Borders::ALL).title("Loaded Latency (Download)"));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Loaded Latency (Download)"),
+    );
     f.render_widget(dl_loaded_stats, lat_row[1]);
 
     // Loaded latency during upload stats (live from samples)
-    let ul_loaded_lat = if state.loaded_ul_latency_samples.is_empty() && state.loaded_ul_latency_sent == 0 {
-        None
-    } else {
-        Some(UiState::compute_live_latency_stats(
-            &state.loaded_ul_latency_samples,
-            state.loaded_ul_latency_sent,
-            state.loaded_ul_latency_received,
-        ))
-    };
+    let ul_loaded_lat =
+        if state.loaded_ul_latency_samples.is_empty() && state.loaded_ul_latency_sent == 0 {
+            None
+        } else {
+            Some(UiState::compute_live_latency_stats(
+                &state.loaded_ul_latency_samples,
+                state.loaded_ul_latency_sent,
+                state.loaded_ul_latency_received,
+            ))
+        };
     let ul_loaded_stats = Paragraph::new(
-        ul_loaded_lat.as_ref().map(format_latency).unwrap_or_else(|| {
-            vec![Line::from("Waiting for data...")]
-        })
+        ul_loaded_lat
+            .as_ref()
+            .map(format_latency)
+            .unwrap_or_else(|| vec![Line::from("Waiting for data...")]),
     )
-    .block(Block::default().borders(Borders::ALL).title("Loaded Latency (Upload)"));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Loaded Latency (Upload)"),
+    );
     f.render_widget(ul_loaded_stats, lat_row[2]);
 
     // Combined Status and Controls panel
-    let saved_path = state.last_result.as_ref()
+    let saved_path = state
+        .last_result
+        .as_ref()
         .and_then(|r| crate::storage::get_run_path(r).ok());
-    
+
     // Determine IP version
-    let ip_version = state.ip.as_deref()
+    let ip_version = state
+        .ip
+        .as_deref()
         .map(|ip| if ip.contains(':') { "IPv6" } else { "IPv4" })
         .unwrap_or("-");
-    
+
     let combined = Paragraph::new(vec![
         Line::from(vec![
             Span::styled("Phase: ", Style::default().fg(Color::Gray)),
@@ -1027,15 +1079,21 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
             Span::styled("Interface: ", Style::default().fg(Color::Gray)),
             Span::raw(state.interface_name.as_deref().unwrap_or("-")),
             Span::raw(" ("),
-            Span::raw(if state.is_wireless.unwrap_or(false) { "Wireless" } else { "Wired" }),
+            Span::raw(if state.is_wireless.unwrap_or(false) {
+                "Wireless"
+            } else {
+                "Wired"
+            }),
             Span::raw(")"),
         ]),
         Line::from(vec![
             Span::styled("Network: ", Style::default().fg(Color::Gray)),
             Span::raw(
-                state.network_name.as_deref()
+                state
+                    .network_name
+                    .as_deref()
                     .or_else(|| state.interface_name.as_deref())
-                    .unwrap_or("-")
+                    .unwrap_or("-"),
             ),
         ]),
         Line::from(vec![
@@ -1045,9 +1103,10 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
         Line::from(vec![
             Span::styled("Link speed: ", Style::default().fg(Color::Gray)),
             Span::raw(
-                state.link_speed_mbps
+                state
+                    .link_speed_mbps
                     .map(|s| format!("{} Mbps", s))
-                    .unwrap_or_else(|| "-".to_string())
+                    .unwrap_or_else(|| "-".to_string()),
             ),
         ]),
         Line::from(vec![
@@ -1056,14 +1115,12 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
         ]),
         Line::from(vec![
             Span::styled("Your network: ", Style::default().fg(Color::Gray)),
-            Span::raw(
-                match (state.as_org.as_deref(), state.asn.as_deref()) {
-                    (Some(org), Some(asn)) => format!("{} (AS{})", org, asn),
-                    (Some(org), None) => org.to_string(),
-                    (None, Some(asn)) => format!("AS{}", asn),
-                    (None, None) => "-".to_string(),
-                }
-            ),
+            Span::raw(match (state.as_org.as_deref(), state.asn.as_deref()) {
+                (Some(org), Some(asn)) => format!("{} (AS{})", org, asn),
+                (Some(org), None) => org.to_string(),
+                (None, Some(asn)) => format!("AS{}", asn),
+                (None, None) => "-".to_string(),
+            }),
         ]),
         Line::from(vec![
             Span::styled("Your IP address: ", Style::default().fg(Color::Gray)),
@@ -1120,7 +1177,7 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
                     Style::default().fg(Color::Green)
                 } else {
                     Style::default().fg(Color::Red)
-                }
+                },
             ),
         ]),
         Line::from(vec![
@@ -1130,16 +1187,23 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
                     .as_ref()
                     .and_then(|p| p.file_name())
                     .and_then(|n| n.to_str())
-                    .unwrap_or("none")
+                    .unwrap_or("none"),
             ),
         ]),
         Line::from(""),
         Line::from(vec![
             Span::styled("Source: ", Style::default().fg(Color::Gray)),
-            Span::styled("https://speed.cloudflare.com/", Style::default().fg(Color::Blue)),
+            Span::styled(
+                "https://speed.cloudflare.com/",
+                Style::default().fg(Color::Blue),
+            ),
         ]),
     ])
-    .block(Block::default().borders(Borders::ALL).title("Network Information"));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Network Information"),
+    );
     f.render_widget(combined, main[3]);
 }
 
@@ -1156,55 +1220,83 @@ fn draw_dashboard_compact(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
 
     let left = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(3), Constraint::Min(0)].as_ref())
+        .constraints(
+            [
+                Constraint::Min(0),
+                Constraint::Length(3),
+                Constraint::Min(0),
+            ]
+            .as_ref(),
+        )
         .split(cols[0]);
 
     let right = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(3), Constraint::Min(0)].as_ref())
+        .constraints(
+            [
+                Constraint::Min(0),
+                Constraint::Length(3),
+                Constraint::Min(0),
+            ]
+            .as_ref(),
+        )
         .split(cols[1]);
 
     // Download sparkline with inst/avg box below
     f.render_widget(
         Sparkline::default()
-            .block(Block::default().borders(Borders::ALL).title("DL sparkline (Mbps)"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("DL sparkline (Mbps)"),
+            )
             .data(&state.dl_series)
             .style(Style::default().fg(Color::Green)),
         left[0],
     );
-    let dl_info = Paragraph::new(Line::from(vec![
-        Span::styled(format!("inst {:.1} / avg {:.1}", state.dl_mbps, state.dl_avg_mbps), Style::default().fg(Color::Green)),
-    ]))
+    let dl_info = Paragraph::new(Line::from(vec![Span::styled(
+        format!("inst {:.1} / avg {:.1}", state.dl_mbps, state.dl_avg_mbps),
+        Style::default().fg(Color::Green),
+    )]))
     .block(
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Green))
-            .title("Download Speed")
+            .title("Download Speed"),
     );
     f.render_widget(dl_info, left[1]);
 
     // Upload sparkline with inst/avg box below
     f.render_widget(
         Sparkline::default()
-            .block(Block::default().borders(Borders::ALL).title("UL sparkline (Mbps)"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("UL sparkline (Mbps)"),
+            )
             .data(&state.ul_series)
             .style(Style::default().fg(Color::Cyan)),
         right[0],
     );
-    let ul_info = Paragraph::new(Line::from(vec![
-        Span::styled(format!("inst {:.1} / avg {:.1}", state.ul_mbps, state.ul_avg_mbps), Style::default().fg(Color::Cyan)),
-    ]))
+    let ul_info = Paragraph::new(Line::from(vec![Span::styled(
+        format!("inst {:.1} / avg {:.1}", state.ul_mbps, state.ul_avg_mbps),
+        Style::default().fg(Color::Cyan),
+    )]))
     .block(
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Cyan))
-            .title("Upload Speed")
+            .title("Upload Speed"),
     );
     f.render_widget(ul_info, right[1]);
 
     f.render_widget(
         Sparkline::default()
-            .block(Block::default().borders(Borders::ALL).title("Idle latency (ms)"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Idle latency (ms)"),
+            )
             .data(&state.idle_lat_series)
             .style(Style::default().fg(Color::Magenta)),
         right[2],
@@ -1222,15 +1314,21 @@ fn draw_dashboard_compact(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
             Span::styled("Interface: ", Style::default().fg(Color::Gray)),
             Span::raw(state.interface_name.as_deref().unwrap_or("-")),
             Span::raw(" ("),
-            Span::raw(if state.is_wireless.unwrap_or(false) { "Wireless" } else { "Wired" }),
+            Span::raw(if state.is_wireless.unwrap_or(false) {
+                "Wireless"
+            } else {
+                "Wired"
+            }),
             Span::raw(")"),
         ]),
         Line::from(vec![
             Span::styled("Network: ", Style::default().fg(Color::Gray)),
             Span::raw(
-                state.network_name.as_deref()
+                state
+                    .network_name
+                    .as_deref()
                     .or_else(|| state.interface_name.as_deref())
-                    .unwrap_or("-")
+                    .unwrap_or("-"),
             ),
         ]),
         Line::from(vec![
@@ -1365,7 +1463,7 @@ fn export_result_json(r: &RunResult, state: &UiState) -> Result<std::path::PathB
         r.timestamp_utc.replace(':', "-").replace('T', "_"),
         &r.meas_id[..8.min(r.meas_id.len())]
     );
-    
+
     // Get absolute path from current directory
     let current_dir = std::env::current_dir().context("get current directory")?;
     let path = current_dir.join(default_name);
@@ -1383,7 +1481,7 @@ fn export_result_csv(r: &RunResult, state: &UiState) -> Result<std::path::PathBu
         r.timestamp_utc.replace(':', "-").replace('T', "_"),
         &r.meas_id[..8.min(r.meas_id.len())]
     );
-    
+
     // Get absolute path from current directory
     let current_dir = std::env::current_dir().context("get current directory")?;
     let path = current_dir.join(default_name);
@@ -1393,8 +1491,8 @@ fn export_result_csv(r: &RunResult, state: &UiState) -> Result<std::path::PathBu
 }
 
 // Global clipboard manager channel - initialized once on first use
-use std::sync::OnceLock;
 use std::sync::mpsc as std_mpsc;
+use std::sync::OnceLock;
 
 static CLIPBOARD_SENDER: OnceLock<std_mpsc::Sender<String>> = OnceLock::new();
 
@@ -1404,11 +1502,11 @@ static CLIPBOARD_SENDER: OnceLock<std_mpsc::Sender<String>> = OnceLock::new();
 fn init_clipboard_manager() -> Result<&'static std_mpsc::Sender<String>> {
     CLIPBOARD_SENDER.get_or_init(|| {
         let (tx, rx) = std_mpsc::channel::<String>();
-        
+
         // Spawn a dedicated thread to manage clipboard operations
         std::thread::spawn(move || {
             use arboard::Clipboard;
-            
+
             for text in rx {
                 // Create a new clipboard instance for each operation
                 if let Ok(mut clipboard) = Clipboard::new() {
@@ -1422,11 +1520,13 @@ fn init_clipboard_manager() -> Result<&'static std_mpsc::Sender<String>> {
                 }
             }
         });
-        
+
         tx
     });
-    
-    CLIPBOARD_SENDER.get().ok_or_else(|| anyhow::anyhow!("Failed to initialize clipboard manager"))
+
+    CLIPBOARD_SENDER
+        .get()
+        .ok_or_else(|| anyhow::anyhow!("Failed to initialize clipboard manager"))
 }
 
 /// Copy text to clipboard.
@@ -1435,7 +1535,8 @@ fn init_clipboard_manager() -> Result<&'static std_mpsc::Sender<String>> {
 /// Returns immediately after queuing the clipboard operation, without blocking the main thread.
 fn copy_to_clipboard(text: &str) -> Result<()> {
     let sender = init_clipboard_manager()?;
-    sender.send(text.to_string())
+    sender
+        .send(text.to_string())
         .map_err(|_| anyhow::anyhow!("Clipboard manager channel closed"))?;
     Ok(())
 }
@@ -1454,17 +1555,17 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
         Span::raw(": export CSV):"),
     ]));
     lines.push(Line::from(""));
-    
+
     // Calculate how many items can fit in the available area
     // Subtract 2 for header lines, and 1 more for the "No history" message if needed
     let max_items = (area.height as usize).saturating_sub(2);
-    
+
     // History is already ordered newest first, so we display it directly
     let history_display: Vec<_> = state.history.iter().take(max_items).collect();
     for (i, r) in history_display.iter().enumerate() {
         // i directly maps to history index since we're not reversing
         let is_selected = state.tab == 1 && i == state.history_selected;
-        
+
         // Parse and format timestamp to human-readable format in local timezone
         let timestamp_str: String = {
             let s = &r.timestamp_utc;
@@ -1474,8 +1575,8 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
                 let date_time: String = s.chars().take(19).collect();
                 if let Some(t_pos) = date_time.find('T') {
                     let date_part = &date_time[..t_pos];
-                    let time_part = &date_time[t_pos+1..];
-                    
+                    let time_part = &date_time[t_pos + 1..];
+
                     // Parse date components
                     if let (Some(year), Some(month), Some(day)) = (
                         date_part.get(0..4).and_then(|s| s.parse::<i32>().ok()),
@@ -1494,8 +1595,9 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
                                     time::Date::from_calendar_date(year, month_enum, day),
                                     time::Time::from_hms(hour, minute, second),
                                 ) {
-                                    let utc_dt = time::PrimitiveDateTime::new(date, time).assume_utc();
-                                    
+                                    let utc_dt =
+                                        time::PrimitiveDateTime::new(date, time).assume_utc();
+
                                     // Get local offset and convert
                                     match time::UtcOffset::current_local_offset() {
                                         Ok(local_offset) => {
@@ -1505,11 +1607,24 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
                                             // Format offset as +HH:MM or -HH:MM
                                             let offset_hours = local_offset.whole_hours();
                                             let offset_minutes = local_offset.whole_minutes() % 60;
-                                            let offset_sign = if offset_hours >= 0 { '+' } else { '-' };
-                                            let offset_str = format!("{}{:02}:{:02}", offset_sign, offset_hours.abs(), offset_minutes.abs());
-                                            format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02} {}", 
-                                                local_date.year(), local_date.month() as u8, local_date.day(),
-                                                local_time.hour(), local_time.minute(), local_time.second(), offset_str)
+                                            let offset_sign =
+                                                if offset_hours >= 0 { '+' } else { '-' };
+                                            let offset_str = format!(
+                                                "{}{:02}:{:02}",
+                                                offset_sign,
+                                                offset_hours.abs(),
+                                                offset_minutes.abs()
+                                            );
+                                            format!(
+                                                "{:04}-{:02}-{:02} {:02}:{:02}:{:02} {}",
+                                                local_date.year(),
+                                                local_date.month() as u8,
+                                                local_date.day(),
+                                                local_time.hour(),
+                                                local_time.minute(),
+                                                local_time.second(),
+                                                offset_str
+                                            )
                                         }
                                         Err(_) => {
                                             // Fallback to UTC if local offset can't be determined
@@ -1535,49 +1650,85 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
                 format!("{} UTC", s)
             }
         };
-        
+
         let style = if is_selected {
-            Style::default().fg(Color::Yellow).add_modifier(ratatui::style::Modifier::REVERSED)
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(ratatui::style::Modifier::REVERSED)
         } else {
             Style::default()
         };
-        
+
         // Line number (1-indexed, newest = 1)
         let line_num = i + 1;
-        
+
         lines.push(Line::from(vec![
-            Span::styled(format!("{:>2}. ", line_num), if is_selected { style } else { Style::default().fg(Color::Gray) }),
+            Span::styled(
+                format!("{:>2}. ", line_num),
+                if is_selected {
+                    style
+                } else {
+                    Style::default().fg(Color::Gray)
+                },
+            ),
             Span::styled(if is_selected { "> " } else { "  " }, style),
-            Span::styled(timestamp_str, if is_selected { style } else { Style::default().fg(Color::Gray) }),
+            Span::styled(
+                timestamp_str,
+                if is_selected {
+                    style
+                } else {
+                    Style::default().fg(Color::Gray)
+                },
+            ),
             Span::raw("  "),
-            Span::styled(format!("DL {:>7.2} Mbps", r.download.mbps), if is_selected { style } else { Style::default().fg(Color::Green) }),
+            Span::styled(
+                format!("DL {:>7.2} Mbps", r.download.mbps),
+                if is_selected {
+                    style
+                } else {
+                    Style::default().fg(Color::Green)
+                },
+            ),
             Span::raw("  "),
-            Span::styled(format!("UL {:>7.2} Mbps", r.upload.mbps), if is_selected { style } else { Style::default().fg(Color::Cyan) }),
+            Span::styled(
+                format!("UL {:>7.2} Mbps", r.upload.mbps),
+                if is_selected {
+                    style
+                } else {
+                    Style::default().fg(Color::Cyan)
+                },
+            ),
             Span::raw("  "),
-            Span::styled(format!("Idle p50 {:>6.1} ms", r.idle_latency.p50_ms.unwrap_or(f64::NAN)), if is_selected { style } else { Style::default() }),
+            Span::styled(
+                format!(
+                    "Idle p50 {:>6.1} ms",
+                    r.idle_latency.p50_ms.unwrap_or(f64::NAN)
+                ),
+                if is_selected { style } else { Style::default() },
+            ),
         ]));
     }
-    
+
     if state.history.is_empty() {
         lines.push(Line::from("No history available."));
     }
-    
+
     // Show exported path if available
     if let Some(ref path) = state.last_exported_path {
         lines.push(Line::from(""));
-        
+
         // Wrap long paths to fit within the available width
         // Account for borders (2 chars on each side)
         let available_width = area.width.saturating_sub(4); // borders
         let prefix = "Last exported: ";
         let prefix_len = prefix.chars().count() as u16;
         let max_path_width = available_width.saturating_sub(prefix_len);
-        
+
         // Split path into chunks that fit
         let path_str = path.as_str();
         let mut remaining = path_str;
         let mut is_first_line = true;
-        
+
         while !remaining.is_empty() {
             let line_width = if is_first_line {
                 // First line can use less width since we have the prefix
@@ -1586,7 +1737,7 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
                 // Subsequent lines can use full width (with 2 char indent)
                 available_width.saturating_sub(2).max(1)
             };
-            
+
             let remaining_chars = remaining.chars().count() as u16;
             if remaining_chars <= line_width {
                 // Entire remaining path fits
@@ -1607,7 +1758,7 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
                 let mut char_count = 0;
                 let mut last_sep_pos = None;
                 let mut break_pos = 0;
-                
+
                 for (idx, ch) in remaining.char_indices() {
                     if char_count >= line_width {
                         break;
@@ -1618,7 +1769,7 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
                     break_pos = idx + ch.len_utf8();
                     char_count += 1;
                 }
-                
+
                 // Prefer breaking at path separator, otherwise break at line width
                 let split_pos = if let Some(sep_pos) = last_sep_pos {
                     if sep_pos > 0 {
@@ -1629,7 +1780,7 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
                 } else {
                     break_pos
                 };
-                
+
                 let (chunk, rest) = remaining.split_at(split_pos);
                 if is_first_line {
                     lines.push(Line::from(vec![
@@ -1646,22 +1797,21 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
                 is_first_line = false;
             }
         }
-        
+
         lines.push(Line::from(vec![
             Span::styled("Press ", Style::default().fg(Color::Gray)),
             Span::styled("y", Style::default().fg(Color::Magenta)),
-            Span::styled(" to copy path to clipboard", Style::default().fg(Color::Gray)),
+            Span::styled(
+                " to copy path to clipboard",
+                Style::default().fg(Color::Gray),
+            ),
         ]));
     }
-    
+
     let p = Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("History"));
     f.render_widget(p, area);
 }
 
 fn max_y(points: &[(f64, f64)]) -> f64 {
-    points
-        .iter()
-        .map(|(_, y)| *y)
-        .fold(0.0, |a, b| a.max(b))
+    points.iter().map(|(_, y)| *y).fold(0.0, |a, b| a.max(b))
 }
-

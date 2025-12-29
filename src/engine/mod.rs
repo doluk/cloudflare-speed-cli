@@ -49,8 +49,14 @@ impl TestEngine {
         let locations = cloudflare::fetch_locations(&client).await.ok();
         let server = meta
             .as_ref()
-            .and_then(|m: &serde_json::Value| m.get("colo").and_then(|v: &serde_json::Value| v.as_str()))
-            .and_then(|colo| locations.as_ref().and_then(|loc| cloudflare::map_colo_to_server(loc, colo)));
+            .and_then(|m: &serde_json::Value| {
+                m.get("colo").and_then(|v: &serde_json::Value| v.as_str())
+            })
+            .and_then(|colo| {
+                locations
+                    .as_ref()
+                    .and_then(|loc| cloudflare::map_colo_to_server(loc, colo))
+            });
 
         // Control listener.
         let paused2 = paused.clone();
@@ -145,7 +151,9 @@ impl TestEngine {
         }
 
         Ok(RunResult {
-            timestamp_utc: time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_else(|_| "now".into()),
+            timestamp_utc: time::OffsetDateTime::now_utc()
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_else(|_| "now".into()),
             base_url: self.cfg.base_url.clone(),
             meas_id: self.cfg.meas_id.clone(),
             meta,
@@ -170,5 +178,3 @@ impl TestEngine {
         })
     }
 }
-
-

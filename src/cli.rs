@@ -7,7 +7,11 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 #[derive(Debug, Parser, Clone)]
-#[command(name = "cloudflare-speed-cli", version, about = "Cloudflare-based speed test with optional TUI")]
+#[command(
+    name = "cloudflare-speed-cli",
+    version,
+    about = "Cloudflare-based speed test with optional TUI"
+)]
 pub struct Cli {
     /// Base URL for the Cloudflare speed test service
     #[arg(long, default_value = "https://speed.cloudflare.com")]
@@ -127,9 +131,9 @@ async fn run_json(args: Cli) -> Result<()> {
         .run(evt_tx, ctrl_rx)
         .await
         .context("speed test failed")?;
-    
+
     handle_exports(&args, &result)?;
-    
+
     println!("{}", serde_json::to_string_pretty(&result)?);
     if let Ok(p) = crate::storage::save_run(&result) {
         eprintln!("Saved: {}", p.display());
@@ -152,15 +156,18 @@ async fn run_text(args: Cli) -> Result<()> {
                 eprintln!("== {phase:?} ==");
             }
             TestEvent::ThroughputTick {
-                phase,
-                bps_instant,
-                ..
+                phase, bps_instant, ..
             } => {
-                if matches!(phase, crate::model::Phase::Download | crate::model::Phase::Upload) {
+                if matches!(
+                    phase,
+                    crate::model::Phase::Download | crate::model::Phase::Upload
+                ) {
                     eprintln!("{phase:?}: {:.2} Mbps", (bps_instant * 8.0) / 1_000_000.0);
                 }
             }
-            TestEvent::LatencySample { phase, ok, rtt_ms, .. } => {
+            TestEvent::LatencySample {
+                phase, ok, rtt_ms, ..
+            } => {
                 if phase == crate::model::Phase::IdleLatency && ok {
                     if let Some(ms) = rtt_ms {
                         eprintln!("Idle latency: {:.1} ms", ms);
@@ -175,13 +182,20 @@ async fn run_text(args: Cli) -> Result<()> {
     }
 
     let result = handle.await??;
-    
+
     handle_exports(&args, &result)?;
     if let Some(meta) = result.meta.as_ref() {
         let ip = meta.get("clientIp").and_then(|v| v.as_str()).unwrap_or("-");
         let colo = meta.get("colo").and_then(|v| v.as_str()).unwrap_or("-");
-        let asn = meta.get("asn").and_then(|v| v.as_i64()).map(|v| v.to_string()).unwrap_or_else(|| "-".to_string());
-        let org = meta.get("asOrganization").and_then(|v| v.as_str()).unwrap_or("-");
+        let asn = meta
+            .get("asn")
+            .and_then(|v| v.as_i64())
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let org = meta
+            .get("asOrganization")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
         println!("IP/Colo/ASN: {ip} / {colo} / {asn} ({org})");
     }
     if let Some(server) = result.server.as_deref() {
@@ -237,5 +251,3 @@ fn handle_exports(args: &Cli, result: &crate::model::RunResult) -> Result<()> {
     }
     Ok(())
 }
-
-

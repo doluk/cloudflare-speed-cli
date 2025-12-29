@@ -2,11 +2,11 @@ use crate::engine::cloudflare::CloudflareClient;
 use crate::model::{LatencySummary, Phase, TestEvent};
 use crate::stats::{latency_summary_from_samples, OnlineStats};
 use anyhow::Result;
-use std::time::{Duration, Instant};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 pub async fn run_latency_probes(
@@ -48,18 +48,15 @@ pub async fn run_latency_probes(
                 received += 1;
                 samples.push(ms);
                 online.push(ms);
-                
+
                 // Extract meta from first successful response
                 if !meta_sent && phase == Phase::IdleLatency {
                     if let Some(meta) = meta_opt {
-                        event_tx
-                            .send(TestEvent::MetaInfo { meta })
-                            .await
-                            .ok();
+                        event_tx.send(TestEvent::MetaInfo { meta }).await.ok();
                         meta_sent = true;
                     }
                 }
-                
+
                 event_tx
                     .send(TestEvent::LatencySample {
                         phase,
@@ -86,7 +83,10 @@ pub async fn run_latency_probes(
         tokio::time::sleep(Duration::from_millis(interval_ms)).await;
     }
 
-    Ok(latency_summary_from_samples(sent, received, &samples, online.stddev()))
+    Ok(latency_summary_from_samples(
+        sent,
+        received,
+        &samples,
+        online.stddev(),
+    ))
 }
-
-

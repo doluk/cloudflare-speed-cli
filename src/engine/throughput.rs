@@ -33,10 +33,7 @@ fn estimate_steady_window(
     }
     let ignore = total_duration.mul_f64(0.20).max(Duration::from_secs(1));
     let t0 = samples[0].0 + ignore;
-    let start_idx = samples
-        .iter()
-        .position(|(t, _)| *t >= t0)
-        .unwrap_or(0);
+    let start_idx = samples.iter().position(|(t, _)| *t >= t0).unwrap_or(0);
     let (t_start, b_start) = samples[start_idx];
     let (t_end, b_end) = *samples.last().unwrap();
     let dt = t_end.saturating_duration_since(t_start);
@@ -159,7 +156,8 @@ pub async fn run_download_with_loaded_latency(
 
     let duration = start.elapsed();
     let bytes_total = total.load(Ordering::Relaxed);
-    let (bytes, window) = estimate_steady_window(&samples, duration).unwrap_or((bytes_total, duration));
+    let (bytes, window) =
+        estimate_steady_window(&samples, duration).unwrap_or((bytes_total, duration));
     let dl = throughput_summary(bytes, window);
 
     let loaded_latency = lat_rx
@@ -184,8 +182,7 @@ pub async fn run_upload_with_loaded_latency(
     for _ in 0..cfg.concurrency {
         let http = client.http.clone();
         let mut url = client.up_url();
-        url.query_pairs_mut()
-            .append_pair("measId", &client.meas_id);
+        url.query_pairs_mut().append_pair("measId", &client.meas_id);
         let stop2 = stop.clone();
         let total2 = total.clone();
         let bytes_per_req = cfg.upload_bytes_per_req;
@@ -299,7 +296,8 @@ pub async fn run_upload_with_loaded_latency(
 
     let duration = start.elapsed();
     let bytes_total = total.load(Ordering::Relaxed);
-    let (bytes, window) = estimate_steady_window(&samples, duration).unwrap_or((bytes_total, duration));
+    let (bytes, window) =
+        estimate_steady_window(&samples, duration).unwrap_or((bytes_total, duration));
     let up = throughput_summary(bytes, window);
 
     let loaded_latency = lat_rx
@@ -309,5 +307,3 @@ pub async fn run_upload_with_loaded_latency(
 
     Ok((up, loaded_latency))
 }
-
-
