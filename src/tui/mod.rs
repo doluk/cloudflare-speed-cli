@@ -1,3 +1,5 @@
+mod charts;
+
 use crate::cli::{build_config, Cli};
 use crate::engine::{EngineControl, TestEngine};
 use crate::model::{Phase, RunResult, TestEvent};
@@ -11,10 +13,11 @@ use futures::StreamExt;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::Color,
+    style::Style,
     symbols,
     text::{Line, Span},
-    widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph, Sparkline, Tabs},
+    widgets::{Axis, Block, Borders, Dataset, GraphType, Paragraph, Sparkline, Tabs},
     Terminal,
 };
 use std::{io, time::Duration, time::Instant};
@@ -63,19 +66,19 @@ struct UiState {
     last_result: Option<RunResult>,
     history: Vec<RunResult>,
     history_selected: usize, // Index of selected history item (0 = most recent)
-    history_scroll_offset: usize, 
+    history_scroll_offset: usize,
     history_loaded_count: usize,
-    initial_history_load_size: usize, // Initial load size based on terminal height 
+    initial_history_load_size: usize, // Initial load size based on terminal height
     ip: Option<String>,
     colo: Option<String>,
     server: Option<String>,
     asn: Option<String>,
     as_org: Option<String>,
     auto_save: bool,
-    last_exported_path: Option<String>, 
+    last_exported_path: Option<String>,
     // Network interface information
     interface_name: Option<String>,
-    network_name: Option<String>, 
+    network_name: Option<String>,
     is_wireless: Option<bool>,
     interface_mac: Option<String>,
     link_speed_mbps: Option<u64>,
@@ -222,7 +225,8 @@ pub async fn run(args: Cli) -> Result<()> {
     // Get terminal size to determine initial history load
     // Load 3x the visible height initially (for smooth scrolling)
     // Default to 24 rows if we can't get terminal size
-    let initial_load = terminal.size()
+    let initial_load = terminal
+        .size()
         .map(|size| ((size.height as usize).saturating_sub(2) * 3).max(20))
         .unwrap_or(66); // Default: (24-2)*3 = 66 items
 
@@ -242,7 +246,9 @@ pub async fn run(args: Cli) -> Result<()> {
     state.is_wireless = network_info.is_wireless;
     state.interface_mac = network_info.interface_mac.clone();
     state.link_speed_mbps = network_info.link_speed_mbps;
-    state.certificate_filename = args.certificate.as_ref()
+    state.certificate_filename = args
+        .certificate
+        .as_ref()
         .and_then(|p| p.file_name())
         .and_then(|n| n.to_str())
         .map(|s| s.to_string());
@@ -282,7 +288,7 @@ pub async fn run(args: Cli) -> Result<()> {
                                         let old_count = state.history.len();
                                         state.history = new_history;
                                         state.history_loaded_count = state.history.len();
-                                        
+
                                         // Adjust selection if needed
                                         if state.history_selected >= state.history.len() && !state.history.is_empty() {
                                             state.history_selected = state.history.len() - 1;
@@ -290,12 +296,12 @@ pub async fn run(args: Cli) -> Result<()> {
                                             state.history_selected = 0;
                                             state.history_scroll_offset = 0;
                                         }
-                                        
+
                                         // Adjust scroll offset if needed
                                         if state.history_scroll_offset >= state.history.len() && !state.history.is_empty() {
                                             state.history_scroll_offset = state.history.len().saturating_sub(20).max(0);
                                         }
-                                        
+
                                         let new_count = state.history.len();
                                         if new_count > old_count {
                                             state.info = format!("Refreshed: {} new run(s)", new_count - old_count);
@@ -470,7 +476,7 @@ pub async fn run(args: Cli) -> Result<()> {
                                     if state.history_selected >= state.history_scroll_offset + estimated_max_items {
                                         state.history_scroll_offset = state.history_selected.saturating_sub(estimated_max_items - 1);
                                     }
-                                    
+
                                     // Lazy load: if we're near the end of loaded items, load more
                                     let load_threshold = state.history_loaded_count.saturating_sub(10);
                                     if state.history_selected >= load_threshold && state.history_loaded_count == state.history.len() {
@@ -817,6 +823,8 @@ fn draw(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
     }
 }
 
+/// Helper function to render a box plot with metrics inside the same bordered box
+
 fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
     // Small terminal: keep the compact dashboard (gauges + sparklines).
     // Large terminal: show full charts (like the website) alongside the live cards.
@@ -828,9 +836,10 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
         .direction(Direction::Vertical)
         .constraints(
             [
-                Constraint::Length(12), // Throughput charts row (side-by-side)
-                Constraint::Length(8),  // Latency stats row (idle + loaded DL + loaded UL)
-                Constraint::Min(0),     // Status + shortcuts
+                Constraint::Length(13), // Throughput charts row with metrics (side-by-side)
+                Constraint::Length(10), // Latency box plots with metrics below (idle + loaded DL + loaded UL)
+                Constraint::Min(0),     // Network Information + Keyboard Shortcuts (side-by-side)
+                Constraint::Length(5),  // Status row (full width at bottom)
             ]
             .as_ref(),
         )
@@ -857,41 +866,46 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
             .marker(symbols::Marker::Braille)
             .style(Style::default().fg(Color::Green))
             .data(&state.dl_points);
-        let dl_chart = Chart::new(vec![dl_ds])
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(Line::from(vec![
-                        Span::raw("Download Throughput (inst "),
-                        Span::styled(
-                            format!("{:.1}", state.dl_mbps),
-                            Style::default().fg(Color::Green),
-                        ),
-                        Span::raw(" / avg "),
-                        Span::styled(
-                            format!("{:.1}", state.dl_avg_mbps),
-                            Style::default().fg(Color::Green),
-                        ),
-                        Span::raw(" Mbps)"),
-                    ])),
-            )
-            .x_axis(Axis::default().bounds([dl_x_min, dl_x_max.max(1.0)]))
-            .y_axis(Axis::default().title("Mbps").bounds([0.0, y_dl_max]));
-        f.render_widget(dl_chart, thr_row[0]);
+
+        let dl_metrics = charts::compute_throughput_metrics(&state.dl_points);
+        // Use the computed mean from metrics for the title to match what's shown below
+        let dl_avg = dl_metrics
+            .map(|(mean, _, _, _)| mean)
+            .unwrap_or(state.dl_avg_mbps);
+        let dl_title = Line::from(vec![
+            Span::raw("Download (inst "),
+            Span::styled(
+                format!("{:.0}", state.dl_mbps),
+                Style::default().fg(Color::Green),
+            ),
+            Span::raw(" / avg "),
+            Span::styled(format!("{:.0}", dl_avg), Style::default().fg(Color::Green)),
+            Span::raw(" Mbps)"),
+        ]);
+        charts::render_chart_with_metrics_inside(
+            f,
+            thr_row[0],
+            vec![dl_ds],
+            Axis::default().bounds([dl_x_min, dl_x_max.max(1.0)]),
+            Axis::default().title("Mbps").bounds([0.0, y_dl_max]),
+            dl_title,
+            dl_metrics,
+            Color::Green,
+        );
     } else {
         // Show empty placeholder when download hasn't started
         let empty_chart = Paragraph::new("Waiting for download phase...").block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(Line::from(vec![
-                    Span::raw("Download Throughput (inst "),
+                    Span::raw("Download (inst "),
                     Span::styled(
-                        format!("{:.1}", state.dl_mbps),
+                        format!("{:.0}", state.dl_mbps),
                         Style::default().fg(Color::Green),
                     ),
                     Span::raw(" / avg "),
                     Span::styled(
-                        format!("{:.1}", state.dl_avg_mbps),
+                        format!("{:.0}", state.dl_avg_mbps),
                         Style::default().fg(Color::Green),
                     ),
                     Span::raw(" Mbps)"),
@@ -915,41 +929,46 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
             .marker(symbols::Marker::Braille)
             .style(Style::default().fg(Color::Cyan))
             .data(&state.ul_points);
-        let ul_chart = Chart::new(vec![ul_ds])
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(Line::from(vec![
-                        Span::raw("Upload Throughput (inst "),
-                        Span::styled(
-                            format!("{:.1}", state.ul_mbps),
-                            Style::default().fg(Color::Cyan),
-                        ),
-                        Span::raw(" / avg "),
-                        Span::styled(
-                            format!("{:.1}", state.ul_avg_mbps),
-                            Style::default().fg(Color::Cyan),
-                        ),
-                        Span::raw(" Mbps)"),
-                    ])),
-            )
-            .x_axis(Axis::default().bounds([ul_x_min, ul_x_max.max(1.0)]))
-            .y_axis(Axis::default().title("Mbps").bounds([0.0, y_ul_max]));
-        f.render_widget(ul_chart, thr_row[1]);
+
+        let ul_metrics = charts::compute_throughput_metrics(&state.ul_points);
+        // Use the computed mean from metrics for the title to match what's shown below
+        let ul_avg = ul_metrics
+            .map(|(mean, _, _, _)| mean)
+            .unwrap_or(state.ul_avg_mbps);
+        let ul_title = Line::from(vec![
+            Span::raw("Upload (inst "),
+            Span::styled(
+                format!("{:.0}", state.ul_mbps),
+                Style::default().fg(Color::Cyan),
+            ),
+            Span::raw(" / avg "),
+            Span::styled(format!("{:.0}", ul_avg), Style::default().fg(Color::Cyan)),
+            Span::raw(" Mbps)"),
+        ]);
+        charts::render_chart_with_metrics_inside(
+            f,
+            thr_row[1],
+            vec![ul_ds],
+            Axis::default().bounds([ul_x_min, ul_x_max.max(1.0)]),
+            Axis::default().title("Mbps").bounds([0.0, y_ul_max]),
+            ul_title,
+            ul_metrics,
+            Color::Cyan,
+        );
     } else {
         // Show empty placeholder when upload hasn't started
         let empty_chart = Paragraph::new("Waiting for upload phase...").block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(Line::from(vec![
-                    Span::raw("Upload Throughput (inst "),
+                    Span::raw("Upload (inst "),
                     Span::styled(
-                        format!("{:.1}", state.ul_mbps),
+                        format!("{:.0}", state.ul_mbps),
                         Style::default().fg(Color::Cyan),
                     ),
                     Span::raw(" / avg "),
                     Span::styled(
-                        format!("{:.1}", state.ul_avg_mbps),
+                        format!("{:.0}", state.ul_avg_mbps),
                         Style::default().fg(Color::Cyan),
                     ),
                     Span::raw(" Mbps)"),
@@ -958,7 +977,7 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
         f.render_widget(empty_chart, thr_row[1]);
     }
 
-    // Latency stats (numeric, not charts): Idle, Loaded DL, Loaded UL
+    // Latency box plots: Idle, Loaded DL, Loaded UL (with metrics inside each box)
     let lat_row = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(
@@ -971,100 +990,90 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
         )
         .split(main[1]);
 
-    // Helper to format latency stats
-    let format_latency = |lat: &crate::model::LatencySummary| -> Vec<Line> {
-        vec![
-            Line::from(vec![
-                Span::styled("p50: ", Style::default().fg(Color::Gray)),
-                Span::raw(format!("{:.1} ms", lat.p50_ms.unwrap_or(f64::NAN))),
-            ]),
-            Line::from(vec![
-                Span::styled("p90: ", Style::default().fg(Color::Gray)),
-                Span::raw(format!("{:.1} ms", lat.p90_ms.unwrap_or(f64::NAN))),
-            ]),
-            Line::from(vec![
-                Span::styled("p99: ", Style::default().fg(Color::Gray)),
-                Span::raw(format!("{:.1} ms", lat.p99_ms.unwrap_or(f64::NAN))),
-            ]),
-            Line::from(vec![
-                Span::styled("Jitter: ", Style::default().fg(Color::Gray)),
-                Span::raw(format!("{:.1} ms", lat.jitter_ms.unwrap_or(f64::NAN))),
-            ]),
-            Line::from(vec![
-                Span::styled("Loss: ", Style::default().fg(Color::Gray)),
-                Span::raw(format!("{:.2}%", lat.loss * 100.0)),
-            ]),
-        ]
-    };
-
-    // Idle latency stats (live from samples)
-    let idle_lat = if state.idle_latency_samples.is_empty() && state.idle_latency_sent == 0 {
-        None
-    } else {
-        Some(UiState::compute_live_latency_stats(
+    // Idle latency
+    if state.idle_latency_samples.len() >= 2 {
+        // Use the same median calculation as the metrics below
+        let median = charts::compute_latency_metrics(&state.idle_latency_samples)
+            .map(|(_, med, _, _)| med)
+            .unwrap_or(f64::NAN);
+        let title = Line::from(format!("Idle Latency ({:.0}ms)", median));
+        charts::render_box_plot_with_metrics_inside(
+            f,
+            lat_row[0],
             &state.idle_latency_samples,
-            state.idle_latency_sent,
-            state.idle_latency_received,
-        ))
-    };
-    let idle_stats = Paragraph::new(
-        idle_lat
-            .as_ref()
-            .map(format_latency)
-            .unwrap_or_else(|| vec![Line::from("Waiting for data...")]),
-    )
-    .block(Block::default().borders(Borders::ALL).title("Idle Latency"));
-    f.render_widget(idle_stats, lat_row[0]);
+            title,
+            None,
+        );
+    } else {
+        let empty = Paragraph::new("Waiting for data...")
+            .block(Block::default().borders(Borders::ALL).title("Idle Latency"));
+        f.render_widget(empty, lat_row[0]);
+    }
 
-    // Loaded latency during download stats (live from samples)
-    let dl_loaded_lat =
-        if state.loaded_dl_latency_samples.is_empty() && state.loaded_dl_latency_sent == 0 {
-            None
-        } else {
-            Some(UiState::compute_live_latency_stats(
-                &state.loaded_dl_latency_samples,
-                state.loaded_dl_latency_sent,
-                state.loaded_dl_latency_received,
-            ))
-        };
-    let dl_loaded_stats = Paragraph::new(
-        dl_loaded_lat
-            .as_ref()
-            .map(format_latency)
-            .unwrap_or_else(|| vec![Line::from("Waiting for data...")]),
-    )
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Loaded Latency (Download)"),
-    );
-    f.render_widget(dl_loaded_stats, lat_row[1]);
+    // Download latency
+    if state.loaded_dl_latency_samples.len() >= 2 {
+        // Use the same median calculation as the metrics below
+        let median = charts::compute_latency_metrics(&state.loaded_dl_latency_samples)
+            .map(|(_, med, _, _)| med)
+            .unwrap_or(f64::NAN);
+        let title = Line::from(vec![
+            Span::raw("Latency Download ("),
+            Span::styled(
+                format!("{:.0}ms", median),
+                Style::default().fg(Color::Green),
+            ),
+            Span::raw(")"),
+        ]);
+        charts::render_box_plot_with_metrics_inside(
+            f,
+            lat_row[1],
+            &state.loaded_dl_latency_samples,
+            title,
+            Some(Color::Green),
+        );
+    } else {
+        let empty = Paragraph::new("Waiting for data...").block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Latency Download"),
+        );
+        f.render_widget(empty, lat_row[1]);
+    }
 
-    // Loaded latency during upload stats (live from samples)
-    let ul_loaded_lat =
-        if state.loaded_ul_latency_samples.is_empty() && state.loaded_ul_latency_sent == 0 {
-            None
-        } else {
-            Some(UiState::compute_live_latency_stats(
-                &state.loaded_ul_latency_samples,
-                state.loaded_ul_latency_sent,
-                state.loaded_ul_latency_received,
-            ))
-        };
-    let ul_loaded_stats = Paragraph::new(
-        ul_loaded_lat
-            .as_ref()
-            .map(format_latency)
-            .unwrap_or_else(|| vec![Line::from("Waiting for data...")]),
-    )
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Loaded Latency (Upload)"),
-    );
-    f.render_widget(ul_loaded_stats, lat_row[2]);
+    // Upload latency
+    if state.loaded_ul_latency_samples.len() >= 2 {
+        // Use the same median calculation as the metrics below
+        let median = charts::compute_latency_metrics(&state.loaded_ul_latency_samples)
+            .map(|(_, med, _, _)| med)
+            .unwrap_or(f64::NAN);
+        let title = Line::from(vec![
+            Span::raw("Latency Upload ("),
+            Span::styled(format!("{:.0}ms", median), Style::default().fg(Color::Cyan)),
+            Span::raw(")"),
+        ]);
+        charts::render_box_plot_with_metrics_inside(
+            f,
+            lat_row[2],
+            &state.loaded_ul_latency_samples,
+            title,
+            Some(Color::Cyan),
+        );
+    } else {
+        let empty = Paragraph::new("Waiting for data...").block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Latency Upload"),
+        );
+        f.render_widget(empty, lat_row[2]);
+    }
 
-    // Combined Status and Controls panel
+    // Network Information and Keyboard Shortcuts side-by-side
+    let info_row = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
+        .split(main[2]);
+
+    // Network Information panel (left)
     let saved_path = state
         .last_result
         .as_ref()
@@ -1077,14 +1086,7 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
         .map(|ip| if ip.contains(':') { "IPv6" } else { "IPv4" })
         .unwrap_or("-");
 
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled("Phase: ", Style::default().fg(Color::Gray)),
-            Span::raw(format!("{:?}", state.phase)),
-            Span::raw("   "),
-            Span::styled("Paused: ", Style::default().fg(Color::Gray)),
-            Span::raw(format!("{}", state.paused)),
-        ]),
+    let mut network_lines = vec![
         Line::from(vec![
             Span::styled("Connected via: ", Style::default().fg(Color::Gray)),
             Span::raw(ip_version),
@@ -1127,13 +1129,13 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
 
     // Only show Certificate line if a certificate is set
     if let Some(ref cert_filename) = state.certificate_filename {
-        lines.push(Line::from(vec![
+        network_lines.push(Line::from(vec![
             Span::styled("Certificate: ", Style::default().fg(Color::Gray)),
             Span::raw(cert_filename),
         ]));
     }
 
-    lines.extend(vec![
+    network_lines.extend(vec![
         Line::from(vec![
             Span::styled("Server location: ", Style::default().fg(Color::Gray)),
             Span::raw(state.server.as_deref().unwrap_or("-")),
@@ -1151,50 +1153,78 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
             Span::styled("Your IP address: ", Style::default().fg(Color::Gray)),
             Span::raw(state.ip.as_deref().unwrap_or("-")),
         ]),
-        Line::from(vec![
-            Span::styled("Info: ", Style::default().fg(Color::Gray)),
-            Span::raw(&state.info),
-        ]),
         Line::from(""),
-        Line::from("Keyboard Shortcuts:"),
+        Line::from(vec![
+            Span::styled("Source: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                "https://speed.cloudflare.com/",
+                Style::default().fg(Color::Blue),
+            ),
+        ]),
+    ]);
+
+    let network_info = Paragraph::new(network_lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Network Information"),
+    );
+    f.render_widget(network_info, info_row[0]);
+
+    // Keyboard Shortcuts panel (right)
+    let shortcuts_lines = vec![
         Line::from(vec![
             Span::raw("  "),
             Span::styled("q", Style::default().fg(Color::Magenta)),
-            Span::raw(" / "),
-            Span::styled("Ctrl-C", Style::default().fg(Color::Magenta)),
-            Span::raw("  Quit"),
+            Span::raw("     Quit"),
         ]),
         Line::from(vec![
             Span::raw("  "),
             Span::styled("r", Style::default().fg(Color::Magenta)),
-            Span::raw("           Rerun test"),
+            Span::raw("     Rerun test"),
         ]),
         Line::from(vec![
             Span::raw("  "),
             Span::styled("p", Style::default().fg(Color::Magenta)),
-            Span::raw("           Pause/Resume"),
+            Span::raw("     Pause/Resume"),
         ]),
         Line::from(vec![
             Span::raw("  "),
             Span::styled("s", Style::default().fg(Color::Magenta)),
-            Span::raw("           Save JSON (auto location)"),
+            Span::raw("     Save JSON"),
         ]),
         Line::from(vec![
             Span::raw("  "),
             Span::styled("a", Style::default().fg(Color::Magenta)),
-            Span::raw("           Toggle auto-save"),
+            Span::raw("     Toggle auto-save"),
         ]),
         Line::from(vec![
             Span::raw("  "),
             Span::styled("tab", Style::default().fg(Color::Magenta)),
-            Span::raw("         Switch tabs"),
+            Span::raw("   Switch tabs"),
         ]),
         Line::from(vec![
             Span::raw("  "),
             Span::styled("?", Style::default().fg(Color::Magenta)),
-            Span::raw("           Help"),
+            Span::raw("     Help"),
         ]),
+    ];
+
+    let shortcuts = Paragraph::new(shortcuts_lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Keyboard Shortcuts"),
+    );
+    f.render_widget(shortcuts, info_row[1]);
+
+    // Status panel (full width at bottom)
+    let status_lines = vec![
         Line::from(vec![
+            Span::styled("Phase: ", Style::default().fg(Color::Gray)),
+            Span::raw(format!("{:?}", state.phase)),
+            Span::raw("   "),
+            Span::styled("Paused: ", Style::default().fg(Color::Gray)),
+            Span::raw(format!("{}", state.paused)),
+            Span::raw("   "),
             Span::styled("Auto-save: ", Style::default().fg(Color::Gray)),
             Span::styled(
                 if state.auto_save { "ON" } else { "OFF" },
@@ -1206,6 +1236,10 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
             ),
         ]),
         Line::from(vec![
+            Span::styled("Info: ", Style::default().fg(Color::Gray)),
+            Span::raw(&state.info),
+        ]),
+        Line::from(vec![
             Span::styled("Saved JSON: ", Style::default().fg(Color::Gray)),
             Span::raw(
                 saved_path
@@ -1215,23 +1249,11 @@ fn draw_dashboard(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
                     .unwrap_or("none"),
             ),
         ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("Source: ", Style::default().fg(Color::Gray)),
-            Span::styled(
-                "https://speed.cloudflare.com/",
-                Style::default().fg(Color::Blue),
-            ),
-        ]),
-    ]);
+    ];
 
-    let combined = Paragraph::new(lines)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Network Information"),
-        );
-    f.render_widget(combined, main[2]);
+    let status =
+        Paragraph::new(status_lines).block(Block::default().borders(Borders::ALL).title("Status"));
+    f.render_widget(status, main[3]);
 }
 
 fn draw_dashboard_compact(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
@@ -1256,12 +1278,12 @@ fn draw_dashboard_compact(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
                     .title(Line::from(vec![
                         Span::raw("Download (inst "),
                         Span::styled(
-                            format!("{:.1}", state.dl_mbps),
+                            format!("{:.0}", state.dl_mbps),
                             Style::default().fg(Color::Green),
                         ),
                         Span::raw(" / avg "),
                         Span::styled(
-                            format!("{:.1}", state.dl_avg_mbps),
+                            format!("{:.0}", state.dl_avg_mbps),
                             Style::default().fg(Color::Green),
                         ),
                         Span::raw(" Mbps)"),
@@ -1281,12 +1303,12 @@ fn draw_dashboard_compact(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
                     .title(Line::from(vec![
                         Span::raw("Upload (inst "),
                         Span::styled(
-                            format!("{:.1}", state.ul_mbps),
+                            format!("{:.0}", state.ul_mbps),
                             Style::default().fg(Color::Cyan),
                         ),
                         Span::raw(" / avg "),
                         Span::styled(
-                            format!("{:.1}", state.ul_avg_mbps),
+                            format!("{:.0}", state.ul_avg_mbps),
                             Style::default().fg(Color::Cyan),
                         ),
                         Span::raw(" Mbps)"),
@@ -1317,23 +1339,23 @@ fn draw_dashboard_compact(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
         vec![
             Line::from(vec![
                 Span::styled("p50: ", Style::default().fg(Color::Gray)),
-                Span::raw(format!("{:.1} ms", lat.p50_ms.unwrap_or(f64::NAN))),
+                Span::raw(format!("{:.0} ms", lat.p50_ms.unwrap_or(f64::NAN))),
             ]),
             Line::from(vec![
                 Span::styled("p90: ", Style::default().fg(Color::Gray)),
-                Span::raw(format!("{:.1} ms", lat.p90_ms.unwrap_or(f64::NAN))),
+                Span::raw(format!("{:.0} ms", lat.p90_ms.unwrap_or(f64::NAN))),
             ]),
             Line::from(vec![
                 Span::styled("p99: ", Style::default().fg(Color::Gray)),
-                Span::raw(format!("{:.1} ms", lat.p99_ms.unwrap_or(f64::NAN))),
+                Span::raw(format!("{:.0} ms", lat.p99_ms.unwrap_or(f64::NAN))),
             ]),
             Line::from(vec![
                 Span::styled("Jitter: ", Style::default().fg(Color::Gray)),
-                Span::raw(format!("{:.1} ms", lat.jitter_ms.unwrap_or(f64::NAN))),
+                Span::raw(format!("{:.0} ms", lat.jitter_ms.unwrap_or(f64::NAN))),
             ]),
             Line::from(vec![
                 Span::styled("Loss: ", Style::default().fg(Color::Gray)),
-                Span::raw(format!("{:.2}%", lat.loss * 100.0)),
+                Span::raw(format!("{:.0}%", lat.loss * 100.0)),
             ]),
         ]
     };
@@ -1406,8 +1428,11 @@ fn draw_dashboard_compact(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
         Line::from("Keys: q quit | r rerun | p pause | s save json | tab switch | ? help"),
     ]);
 
-    let meta = Paragraph::new(meta_lines)
-        .block(Block::default().borders(Borders::ALL).title("Network Information"));
+    let meta = Paragraph::new(meta_lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Network Information"),
+    );
     f.render_widget(meta, bottom_row[1]);
 }
 
@@ -1434,7 +1459,7 @@ fn draw_help(area: Rect, f: &mut ratatui::Frame) {
         Line::from(vec![
             Span::raw("  "),
             Span::styled("s", Style::default().fg(Color::Magenta)),
-            Span::raw("           Save JSON (auto location)"),
+            Span::raw("           Save JSON"),
         ]),
         Line::from(vec![
             Span::raw("  "),
@@ -1486,6 +1511,14 @@ fn draw_help(area: Rect, f: &mut ratatui::Frame) {
             Span::raw("           Refresh history"),
         ]),
         Line::from(""),
+        Line::from("Repository:"),
+        Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                "https://github.com/kavehtehrani/cloudflare-speed-cli",
+                Style::default().fg(Color::Cyan),
+            ),
+        ]),
     ])
     .block(Block::default().borders(Borders::ALL).title("Help"));
     f.render_widget(p, area);
@@ -1502,16 +1535,16 @@ fn enrich_result_with_network_info(r: &RunResult, state: &UiState) -> RunResult 
         interface_mac: state.interface_mac.clone(),
         link_speed_mbps: state.link_speed_mbps,
     };
-    
+
     // Use shared enrichment function
     let mut enriched = crate::network::enrich_result(r, &network_info);
-    
+
     // Override with TUI state values (which may have been updated from meta)
     enriched.ip = state.ip.clone();
     enriched.colo = state.colo.clone();
     enriched.asn = state.asn.clone();
     enriched.as_org = state.as_org.clone();
-    
+
     // Server might already be set, but update from state if available
     if enriched.server.is_none() {
         enriched.server = state.server.clone();
@@ -1614,11 +1647,11 @@ fn copy_to_clipboard(text: &str) -> Result<()> {
 
 fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
     let mut lines: Vec<Line> = Vec::new();
-    
+
     // Calculate how many items can fit in the available area
     // Subtract 2 for header lines
     let max_items = (area.height as usize).saturating_sub(2);
-    
+
     // Show total count and current position
     let total_count = state.history.len();
     let current_pos = if total_count > 0 {
@@ -1626,7 +1659,7 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
     } else {
         0
     };
-    
+
     lines.push(Line::from(vec![
         Span::raw(format!("History ({}/{}", current_pos, total_count)),
         if total_count > max_items {
@@ -1651,7 +1684,9 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
     // Apply scroll offset and take only visible items
     // Auto-adjust scroll to keep selected item visible (this should have been done in event handler, but handle edge cases here)
     let scroll_offset = {
-        let mut offset = state.history_scroll_offset.min(state.history.len().saturating_sub(1));
+        let mut offset = state
+            .history_scroll_offset
+            .min(state.history.len().saturating_sub(1));
         // Ensure selected item is visible
         if state.history_selected < offset {
             offset = state.history_selected;
@@ -1660,13 +1695,14 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
         }
         offset
     };
-    
-    let history_display: Vec<_> = state.history
+
+    let history_display: Vec<_> = state
+        .history
         .iter()
         .skip(scroll_offset)
         .take(max_items)
         .collect();
-    
+
     for (display_idx, r) in history_display.iter().enumerate() {
         // Calculate actual history index (accounting for scroll offset)
         let history_idx = scroll_offset + display_idx;
@@ -1788,7 +1824,7 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
             ),
             Span::raw("  "),
             Span::styled(
-                format!("DL {:>7.2} Mbps", r.download.mbps),
+                format!("DL {:>7.0} Mbps", r.download.mbps),
                 if is_selected {
                     style
                 } else {
@@ -1797,7 +1833,7 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
             ),
             Span::raw("  "),
             Span::styled(
-                format!("UL {:>7.2} Mbps", r.upload.mbps),
+                format!("UL {:>7.0} Mbps", r.upload.mbps),
                 if is_selected {
                     style
                 } else {
@@ -1807,17 +1843,14 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
             Span::raw("  "),
             Span::styled(
                 format!(
-                    "Idle p50 {:>6.1} ms",
+                    "Idle p50 {:>6.0} ms",
                     r.idle_latency.p50_ms.unwrap_or(f64::NAN)
                 ),
                 if is_selected { style } else { Style::default() },
             ),
             Span::raw("  "),
             Span::styled(
-                format!(
-                    "{}",
-                    r.interface_name.as_deref().unwrap_or("-")
-                ),
+                format!("{}", r.interface_name.as_deref().unwrap_or("-")),
                 if is_selected {
                     style
                 } else {
@@ -1828,7 +1861,10 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
             Span::styled(
                 format!(
                     "{}",
-                    r.network_name.as_deref().or_else(|| r.interface_name.as_deref()).unwrap_or("-")
+                    r.network_name
+                        .as_deref()
+                        .or_else(|| r.interface_name.as_deref())
+                        .unwrap_or("-")
                 ),
                 if is_selected {
                     style
@@ -1945,3 +1981,5 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
 fn max_y(points: &[(f64, f64)]) -> f64 {
     points.iter().map(|(_, y)| *y).fold(0.0, |a, b| a.max(b))
 }
+
+// Compute latency metrics (mean, median, 25th percentile, 75th percentile) from samples
