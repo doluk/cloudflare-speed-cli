@@ -330,9 +330,9 @@ async fn run_text(args: Cli) -> Result<()> {
     );
     if let Some(ref exp) = enriched.experimental_udp {
         println!(
-            "Experimental UDP-like loss probe: loss {:.1}% p50 {} ms (target {:?})",
+            "Experimental UDP-like loss probe: loss {:.1}% med {} ms (target {:?})",
             exp.latency.loss * 100.0,
-            exp.latency.p50_ms.unwrap_or(f64::NAN),
+            exp.latency.median_ms.unwrap_or(f64::NAN),
             exp.target
         );
     }

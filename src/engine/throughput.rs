@@ -14,13 +14,34 @@ use tokio::sync::mpsc;
 /// Chunk size for upload stream generation (64 KB)
 const UPLOAD_CHUNK_SIZE: u64 = 64 * 1024;
 
-fn throughput_summary(bytes: u64, duration: Duration) -> ThroughputSummary {
-    let secs = duration.as_secs_f64().max(1e-9);
-    let bps = (bytes as f64) / secs;
+fn throughput_summary(bytes: u64, duration: Duration, mbps_samples: Vec<f64>) -> ThroughputSummary {
+    // Compute metrics using the same method as metrics.rs for consistency
+    let (mean_mbps, median_mbps, p25_mbps, p75_mbps) = if mbps_samples.len() >= 2 {
+        crate::metrics::compute_metrics(mbps_samples.clone()).unwrap_or_else(|| {
+            // Fallback: calculate from bytes/duration if no samples
+            let secs = duration.as_secs_f64().max(1e-9);
+            let bps = (bytes as f64) / secs;
+            let mbps = (bps * 8.0) / 1_000_000.0;
+            (mbps, mbps, mbps, mbps)
+        })
+    } else {
+        // Fallback: calculate from bytes/duration if insufficient samples
+        let secs = duration.as_secs_f64().max(1e-9);
+        let bps = (bytes as f64) / secs;
+        let mbps = (bps * 8.0) / 1_000_000.0;
+        (mbps, mbps, mbps, mbps)
+    };
+
+    let mbps = mean_mbps;
+
     ThroughputSummary {
         bytes,
         duration_ms: duration.as_millis() as u64,
-        mbps: (bps * 8.0) / 1_000_000.0,
+        mbps,
+        mean_mbps: Some(mean_mbps),
+        median_mbps: Some(median_mbps),
+        p25_mbps: Some(p25_mbps),
+        p75_mbps: Some(p75_mbps),
     }
 }
 
@@ -107,9 +128,10 @@ pub async fn run_download_with_loaded_latency(
             received: 0,
             loss: 1.0,
             min_ms: None,
-            p50_ms: None,
-            p90_ms: None,
-            p99_ms: None,
+            mean_ms: None,
+            median_ms: None,
+            p25_ms: None,
+            p75_ms: None,
             max_ms: None,
             jitter_ms: None,
         });
@@ -120,6 +142,7 @@ pub async fn run_download_with_loaded_latency(
     let mut last_bytes = 0u64;
     let mut last_t = Instant::now();
     let mut samples: Vec<(Instant, u64)> = Vec::with_capacity(256);
+    let mut mbps_samples: Vec<f64> = Vec::with_capacity(256);
 
     while start.elapsed() < cfg.download_duration {
         while paused.load(Ordering::Relaxed) && !cancel.load(Ordering::Relaxed) {
@@ -133,9 +156,11 @@ pub async fn run_download_with_loaded_latency(
         let dt = last_t.elapsed().as_secs_f64().max(1e-9);
         let dbytes = now_total.saturating_sub(last_bytes);
         let bps_instant = (dbytes as f64) / dt;
+        let mbps_instant = (bps_instant * 8.0) / 1_000_000.0;
         last_t = Instant::now();
         last_bytes = now_total;
         samples.push((Instant::now(), now_total));
+        mbps_samples.push(mbps_instant);
 
         event_tx
             .send(TestEvent::ThroughputTick {
@@ -158,7 +183,7 @@ pub async fn run_download_with_loaded_latency(
     let bytes_total = total.load(Ordering::Relaxed);
     let (bytes, window) =
         estimate_steady_window(&samples, duration).unwrap_or((bytes_total, duration));
-    let dl = throughput_summary(bytes, window);
+    let dl = throughput_summary(bytes, window, mbps_samples);
 
     let loaded_latency = lat_rx
         .recv()
@@ -250,9 +275,10 @@ pub async fn run_upload_with_loaded_latency(
             received: 0,
             loss: 1.0,
             min_ms: None,
-            p50_ms: None,
-            p90_ms: None,
-            p99_ms: None,
+            mean_ms: None,
+            median_ms: None,
+            p25_ms: None,
+            p75_ms: None,
             max_ms: None,
             jitter_ms: None,
         });
@@ -263,6 +289,7 @@ pub async fn run_upload_with_loaded_latency(
     let mut last_bytes = 0u64;
     let mut last_t = Instant::now();
     let mut samples: Vec<(Instant, u64)> = Vec::with_capacity(256);
+    let mut mbps_samples: Vec<f64> = Vec::with_capacity(256);
 
     while start.elapsed() < cfg.upload_duration {
         while paused.load(Ordering::Relaxed) && !cancel.load(Ordering::Relaxed) {
@@ -276,9 +303,11 @@ pub async fn run_upload_with_loaded_latency(
         let dt = last_t.elapsed().as_secs_f64().max(1e-9);
         let dbytes = now_total.saturating_sub(last_bytes);
         let bps_instant = (dbytes as f64) / dt;
+        let mbps_instant = (bps_instant * 8.0) / 1_000_000.0;
         last_t = Instant::now();
         last_bytes = now_total;
         samples.push((Instant::now(), now_total));
+        mbps_samples.push(mbps_instant);
 
         event_tx
             .send(TestEvent::ThroughputTick {
@@ -301,7 +330,7 @@ pub async fn run_upload_with_loaded_latency(
     let bytes_total = total.load(Ordering::Relaxed);
     let (bytes, window) =
         estimate_steady_window(&samples, duration).unwrap_or((bytes_total, duration));
-    let up = throughput_summary(bytes, window);
+    let up = throughput_summary(bytes, window, mbps_samples);
 
     let loaded_latency = lat_rx
         .recv()

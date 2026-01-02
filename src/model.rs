@@ -61,9 +61,10 @@ pub struct LatencySummary {
     pub received: u64,
     pub loss: f64,
     pub min_ms: Option<f64>,
-    pub p50_ms: Option<f64>,
-    pub p90_ms: Option<f64>,
-    pub p99_ms: Option<f64>,
+    pub mean_ms: Option<f64>,
+    pub median_ms: Option<f64>,
+    pub p25_ms: Option<f64>,
+    pub p75_ms: Option<f64>,
     pub max_ms: Option<f64>,
     pub jitter_ms: Option<f64>,
 }
@@ -73,6 +74,10 @@ pub struct ThroughputSummary {
     pub bytes: u64,
     pub duration_ms: u64,
     pub mbps: f64,
+    pub mean_mbps: Option<f64>,
+    pub median_mbps: Option<f64>,
+    pub p25_mbps: Option<f64>,
+    pub p75_mbps: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

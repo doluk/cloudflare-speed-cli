@@ -1,5 +1,4 @@
 use crate::model::LatencySummary;
-use hdrhistogram::Histogram;
 
 #[derive(Debug, Default, Clone)]
 pub struct OnlineStats {
@@ -44,36 +43,56 @@ pub fn latency_summary_from_samples(
             received,
             loss,
             min_ms: None,
-            p50_ms: None,
-            p90_ms: None,
-            p99_ms: None,
+            mean_ms: None,
+            median_ms: None,
+            p25_ms: None,
+            p75_ms: None,
             max_ms: None,
             jitter_ms,
         };
     }
 
-    // HDRHistogram wants integer values; store microseconds to preserve precision.
-    let mut h = Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap();
-    for &ms in samples_ms {
-        let us = (ms * 1000.0).round().clamp(1.0, 60_000_000.0) as u64;
-        let _ = h.record(us);
-    }
+    // Use the same calculation method as metrics.rs for consistency
+    let mut sorted = samples_ms.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let n = sorted.len();
 
-    let min_ms = Some((h.min() as f64) / 1000.0);
-    let max_ms = Some((h.max() as f64) / 1000.0);
-    let p50_ms = Some((h.value_at_quantile(0.50) as f64) / 1000.0);
-    let p90_ms = Some((h.value_at_quantile(0.90) as f64) / 1000.0);
-    let p99_ms = Some((h.value_at_quantile(0.99) as f64) / 1000.0);
+    let min_ms = Some(sorted[0]);
+    let max_ms = Some(sorted[n - 1]);
 
-    LatencySummary {
-        sent,
-        received,
-        loss,
-        min_ms,
-        p50_ms,
-        p90_ms,
-        p99_ms,
-        max_ms,
-        jitter_ms,
+    // Compute metrics using the same method as metrics.rs
+    if let Some((mean, median, p25, p75)) = crate::metrics::compute_metrics(samples_ms.to_vec()) {
+        // Compute jitter (stddev) if not provided
+        let jitter = jitter_ms.unwrap_or_else(|| {
+            let variance = samples_ms.iter().map(|&x| (x - mean).powi(2)).sum::<f64>()
+                / samples_ms.len() as f64;
+            variance.sqrt()
+        });
+
+        LatencySummary {
+            sent,
+            received,
+            loss,
+            min_ms,
+            mean_ms: Some(mean),
+            median_ms: Some(median),
+            p25_ms: Some(p25),
+            p75_ms: Some(p75),
+            max_ms,
+            jitter_ms: Some(jitter),
+        }
+    } else {
+        LatencySummary {
+            sent,
+            received,
+            loss,
+            min_ms: None,
+            mean_ms: None,
+            median_ms: None,
+            p25_ms: None,
+            p75_ms: None,
+            max_ms: None,
+            jitter_ms,
+        }
     }
 }

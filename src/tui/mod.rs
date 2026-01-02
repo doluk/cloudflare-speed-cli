@@ -165,7 +165,6 @@ impl UiState {
         sent: u64,
         received: u64,
     ) -> crate::model::LatencySummary {
-        use hdrhistogram::Histogram;
         let loss = if sent == 0 {
             0.0
         } else {
@@ -178,37 +177,55 @@ impl UiState {
                 received,
                 loss,
                 min_ms: None,
-                p50_ms: None,
-                p90_ms: None,
-                p99_ms: None,
+                mean_ms: None,
+                median_ms: None,
+                p25_ms: None,
+                p75_ms: None,
                 max_ms: None,
                 jitter_ms: None,
             };
         }
 
-        // Compute jitter (stddev) from samples
-        let mean = samples.iter().sum::<f64>() / samples.len() as f64;
-        let variance =
-            samples.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / samples.len() as f64;
-        let jitter_ms = Some(variance.sqrt());
+        // Use the same calculation method as metrics.rs for consistency
+        let mut sorted = samples.to_vec();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let n = sorted.len();
 
-        // Use HDRHistogram for percentiles
-        let mut h = Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap();
-        for &ms in samples {
-            let us = (ms * 1000.0).round().clamp(1.0, 60_000_000.0) as u64;
-            let _ = h.record(us);
-        }
+        let min_ms = Some(sorted[0]);
+        let max_ms = Some(sorted[n - 1]);
 
-        crate::model::LatencySummary {
-            sent,
-            received,
-            loss,
-            min_ms: Some((h.min() as f64) / 1000.0),
-            p50_ms: Some((h.value_at_quantile(0.50) as f64) / 1000.0),
-            p90_ms: Some((h.value_at_quantile(0.90) as f64) / 1000.0),
-            p99_ms: Some((h.value_at_quantile(0.99) as f64) / 1000.0),
-            max_ms: Some((h.max() as f64) / 1000.0),
-            jitter_ms,
+        // Compute metrics using the same method as metrics.rs
+        if let Some((mean, median, p25, p75)) = crate::metrics::compute_metrics(samples.to_vec()) {
+            // Compute jitter (stddev) from samples
+            let variance =
+                samples.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / samples.len() as f64;
+            let jitter_ms = Some(variance.sqrt());
+
+            crate::model::LatencySummary {
+                sent,
+                received,
+                loss,
+                min_ms,
+                mean_ms: Some(mean),
+                median_ms: Some(median),
+                p25_ms: Some(p25),
+                p75_ms: Some(p75),
+                max_ms,
+                jitter_ms,
+            }
+        } else {
+            crate::model::LatencySummary {
+                sent,
+                received,
+                loss,
+                min_ms: None,
+                mean_ms: None,
+                median_ms: None,
+                p25_ms: None,
+                p75_ms: None,
+                max_ms: None,
+                jitter_ms: None,
+            }
         }
     }
 }
@@ -369,24 +386,8 @@ pub async fn run(args: Cli) -> Result<()> {
                         (_, KeyCode::Char('s')) => {
                             // Only save on dashboard (auto-save location)
                             if state.tab == 0 {
-                                if let Some(r) = state.last_result.as_ref() {
-                                    match save_result_json(r, &state) {
-                                        Ok(path) => {
-                                            // Update last_result to the enriched version that was saved
-                                            // This ensures the path computation matches
-                                            let enriched = enrich_result_with_network_info(r, &state);
-                                            state.last_result = Some(enriched);
-                                            // Verify file exists before showing path
-                                            if path.exists() {
-                                                state.info = format!("Saved: {}", path.display());
-                                            } else {
-                                                state.info = format!("Saved (verifying): {}", path.display());
-                                            }
-                                        }
-                                        Err(e) => {
-                                            state.info = format!("Save failed: {e:#}");
-                                        }
-                                    }
+                                if let Some(r) = state.last_result.clone() {
+                                    save_and_show_path(&r, &mut state);
                                 } else {
                                     state.info = "No completed run to save yet.".into();
                                 }
@@ -566,8 +567,7 @@ pub async fn run(args: Cli) -> Result<()> {
                             match h.await {
                                 Ok(Ok(r)) => {
                                     if state.auto_save {
-                                        let enriched = enrich_result_with_network_info(&r, &state);
-                                        crate::storage::save_run(&enriched).ok();
+                                        save_and_show_path(&r, &mut state);
                                     }
                                     if let Some(meta) = r.meta.as_ref() {
                                         // Try multiple possible field names for IP
@@ -629,7 +629,6 @@ pub async fn run(args: Cli) -> Result<()> {
                                         state.history_selected = 0;
                                         state.history_scroll_offset = 0;
                                     }
-                                    state.info = "Done. (r rerun, q quit)".into();
                                 }
                                 Ok(Err(e)) => state.info = format!("Run failed: {e:#}"),
                                 Err(e) => state.info = format!("Run join failed: {e}"),
@@ -1426,16 +1425,20 @@ fn draw_dashboard_compact(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
     let format_latency = |lat: &crate::model::LatencySummary| -> Vec<Line> {
         vec![
             Line::from(vec![
-                Span::styled("p50: ", Style::default().fg(Color::Gray)),
-                Span::raw(format!("{:.0} ms", lat.p50_ms.unwrap_or(f64::NAN))),
+                Span::styled("avg: ", Style::default().fg(Color::Gray)),
+                Span::raw(format!("{:.0} ms", lat.mean_ms.unwrap_or(f64::NAN))),
             ]),
             Line::from(vec![
-                Span::styled("p90: ", Style::default().fg(Color::Gray)),
-                Span::raw(format!("{:.0} ms", lat.p90_ms.unwrap_or(f64::NAN))),
+                Span::styled("med: ", Style::default().fg(Color::Gray)),
+                Span::raw(format!("{:.0} ms", lat.median_ms.unwrap_or(f64::NAN))),
             ]),
             Line::from(vec![
-                Span::styled("p99: ", Style::default().fg(Color::Gray)),
-                Span::raw(format!("{:.0} ms", lat.p99_ms.unwrap_or(f64::NAN))),
+                Span::styled("p25: ", Style::default().fg(Color::Gray)),
+                Span::raw(format!("{:.0} ms", lat.p25_ms.unwrap_or(f64::NAN))),
+            ]),
+            Line::from(vec![
+                Span::styled("p75: ", Style::default().fg(Color::Gray)),
+                Span::raw(format!("{:.0} ms", lat.p75_ms.unwrap_or(f64::NAN))),
             ]),
             Line::from(vec![
                 Span::styled("Jitter: ", Style::default().fg(Color::Gray)),
@@ -1644,6 +1647,27 @@ fn enrich_result_with_network_info(r: &RunResult, state: &UiState) -> RunResult 
 fn save_result_json(r: &RunResult, state: &UiState) -> Result<std::path::PathBuf> {
     let enriched = enrich_result_with_network_info(r, state);
     crate::storage::save_run(&enriched)
+}
+
+/// Save result and update state.info with the saved path message.
+fn save_and_show_path(r: &RunResult, state: &mut UiState) {
+    match save_result_json(r, state) {
+        Ok(path) => {
+            // Update last_result to the enriched version that was saved
+            // This ensures the path computation matches
+            let enriched = enrich_result_with_network_info(r, state);
+            state.last_result = Some(enriched);
+            // Verify file exists before showing path
+            if path.exists() {
+                state.info = format!("Saved: {}", path.display());
+            } else {
+                state.info = format!("Saved (verifying): {}", path.display());
+            }
+        }
+        Err(e) => {
+            state.info = format!("Save failed: {e:#}");
+        }
+    }
 }
 
 /// Export JSON to a user-specified file location.
@@ -2003,8 +2027,8 @@ fn draw_history(area: Rect, f: &mut ratatui::Frame, state: &UiState) {
             Span::raw("  "),
             Span::styled(
                 format!(
-                    "Idle p50 {:>6.0} ms",
-                    r.idle_latency.p50_ms.unwrap_or(f64::NAN)
+                    "Idle med {:>6.0} ms",
+                    r.idle_latency.median_ms.unwrap_or(f64::NAN)
                 ),
                 if is_selected { style } else { Style::default() },
             ),
