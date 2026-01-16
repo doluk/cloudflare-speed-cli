@@ -21,7 +21,7 @@ A CLI tool that displays network speed test results from Cloudflare's speed test
 
 ### From Source
 
-My preferred way if you have cargo installed
+My preferred way if you have cargo installed:
 
 ```bash
 cargo install --git https://github.com/kavehtehrani/cloudflare-speed-cli --features tui
