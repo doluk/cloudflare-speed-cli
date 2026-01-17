@@ -9,7 +9,7 @@ pub fn compute_metrics(samples: &[f64]) -> Option<(f64, f64, f64, f64)> {
 
     // Sort a copy for percentile calculations
     let mut sorted = samples.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     let median = sorted[n / 2];
     let p25 = sorted[n / 4];

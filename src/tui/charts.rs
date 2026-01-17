@@ -57,7 +57,7 @@ pub fn render_box_plot_with_metrics_inside(
     if samples.len() >= 2 {
         // Create box plot without borders (we'll add borders to the whole widget)
         let mut sorted = samples.to_vec();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let n = sorted.len();
         let (min_val, max_val, q1, med, q3, mean) = if n >= 2 {
             let min = sorted[0];

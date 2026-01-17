@@ -1,9 +1,10 @@
 use crate::engine::cloudflare::CloudflareClient;
+use crate::engine::wait_if_paused_or_cancelled;
 use crate::model::{LatencySummary, Phase, TestEvent};
 use crate::stats::{latency_summary_from_samples, OnlineStats};
 use anyhow::Result;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::AtomicBool,
     Arc,
 };
 use std::time::{Duration, Instant};
@@ -28,10 +29,7 @@ pub async fn run_latency_probes(
     let mut meta_sent = false;
 
     while start.elapsed() < total_duration {
-        while paused.load(Ordering::Relaxed) && !cancel.load(Ordering::Relaxed) {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        if cancel.load(Ordering::Relaxed) {
+        if wait_if_paused_or_cancelled(&paused, &cancel).await {
             break;
         }
 

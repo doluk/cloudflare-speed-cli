@@ -10,7 +10,20 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use std::time::Duration;
 use tokio::sync::mpsc;
+
+/// Check if paused, wait while paused, and return true if cancelled.
+/// Returns true if the caller should break out of its loop.
+pub(crate) async fn wait_if_paused_or_cancelled(
+    paused: &AtomicBool,
+    cancel: &AtomicBool,
+) -> bool {
+    while paused.load(Ordering::Relaxed) && !cancel.load(Ordering::Relaxed) {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    cancel.load(Ordering::Relaxed)
+}
 
 #[derive(Debug, Clone)]
 pub enum EngineControl {

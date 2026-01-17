@@ -1,5 +1,6 @@
 use crate::engine::cloudflare::CloudflareClient;
 use crate::engine::latency::run_latency_probes;
+use crate::engine::wait_if_paused_or_cancelled;
 use crate::model::{LatencySummary, Phase, RunConfig, TestEvent, ThroughputSummary};
 use anyhow::{Context, Result};
 use bytes::Bytes;
@@ -8,8 +9,9 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio::time::Instant;
 
 /// Chunk size for upload stream generation (64 KB)
 const UPLOAD_CHUNK_SIZE: u64 = 64 * 1024;
@@ -67,6 +69,7 @@ pub async fn run_download_with_loaded_latency(
 ) -> Result<(ThroughputSummary, LatencySummary)> {
     let stop = Arc::new(AtomicBool::new(false));
     let total = Arc::new(AtomicU64::new(0));
+    let errors = Arc::new(AtomicU64::new(0));
 
     let mut handles = Vec::new();
     for _ in 0..cfg.concurrency {
@@ -78,12 +81,16 @@ pub async fn run_download_with_loaded_latency(
             .append_pair("bytes", &cfg.download_bytes_per_req.to_string());
         let stop2 = stop.clone();
         let total2 = total.clone();
+        let errors2 = errors.clone();
 
         handles.push(tokio::spawn(async move {
             while !stop2.load(Ordering::Relaxed) {
                 let resp = match http.get(url.clone()).send().await {
                     Ok(r) => r,
-                    Err(_) => continue,
+                    Err(_) => {
+                        errors2.fetch_add(1, Ordering::Relaxed);
+                        continue;
+                    }
                 };
                 let mut stream = resp.bytes_stream();
                 while let Some(chunk) = stream.next().await {
@@ -128,10 +135,7 @@ pub async fn run_download_with_loaded_latency(
     let mut mbps_samples: Vec<f64> = Vec::with_capacity(256);
 
     while start.elapsed() < cfg.download_duration {
-        while paused.load(Ordering::Relaxed) && !cancel.load(Ordering::Relaxed) {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        if cancel.load(Ordering::Relaxed) {
+        if wait_if_paused_or_cancelled(&paused, &cancel).await {
             break;
         }
 
@@ -164,13 +168,23 @@ pub async fn run_download_with_loaded_latency(
 
     let duration = start.elapsed();
     let bytes_total = total.load(Ordering::Relaxed);
+    let error_count = errors.load(Ordering::Relaxed);
+    if error_count > 0 {
+        event_tx
+            .send(TestEvent::Info {
+                message: format!("Download: {} request(s) failed", error_count),
+            })
+            .await
+            .ok();
+    }
     let (bytes, window) =
         estimate_steady_window(&samples, duration).unwrap_or((bytes_total, duration));
     let dl = throughput_summary(bytes, window, &mbps_samples);
 
-    let loaded_latency = lat_rx
-        .recv()
+    // Wait for latency results with a timeout to prevent indefinite hangs
+    let loaded_latency = tokio::time::timeout(Duration::from_secs(30), lat_rx.recv())
         .await
+        .context("timed out waiting for loaded latency results")?
         .context("loaded latency task ended unexpectedly")?;
 
     // Ensure the latency probe task has completed
@@ -188,6 +202,7 @@ pub async fn run_upload_with_loaded_latency(
 ) -> Result<(ThroughputSummary, LatencySummary)> {
     let stop = Arc::new(AtomicBool::new(false));
     let total = Arc::new(AtomicU64::new(0));
+    let errors = Arc::new(AtomicU64::new(0));
 
     let mut handles = Vec::new();
     for _ in 0..cfg.concurrency {
@@ -196,6 +211,7 @@ pub async fn run_upload_with_loaded_latency(
         url.query_pairs_mut().append_pair("measId", &client.meas_id);
         let stop2 = stop.clone();
         let total2 = total.clone();
+        let errors2 = errors.clone();
         let bytes_per_req = cfg.upload_bytes_per_req;
 
         handles.push(tokio::spawn(async move {
@@ -228,7 +244,9 @@ pub async fn run_upload_with_loaded_latency(
                 };
 
                 let body = reqwest::Body::wrap_stream(body_stream);
-                let _ = http.post(url.clone()).body(body).send().await;
+                if http.post(url.clone()).body(body).send().await.is_err() {
+                    errors2.fetch_add(1, Ordering::Relaxed);
+                }
             }
         }));
     }
@@ -264,10 +282,7 @@ pub async fn run_upload_with_loaded_latency(
     let mut mbps_samples: Vec<f64> = Vec::with_capacity(256);
 
     while start.elapsed() < cfg.upload_duration {
-        while paused.load(Ordering::Relaxed) && !cancel.load(Ordering::Relaxed) {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        if cancel.load(Ordering::Relaxed) {
+        if wait_if_paused_or_cancelled(&paused, &cancel).await {
             break;
         }
 
@@ -300,13 +315,23 @@ pub async fn run_upload_with_loaded_latency(
 
     let duration = start.elapsed();
     let bytes_total = total.load(Ordering::Relaxed);
+    let error_count = errors.load(Ordering::Relaxed);
+    if error_count > 0 {
+        event_tx
+            .send(TestEvent::Info {
+                message: format!("Upload: {} request(s) failed", error_count),
+            })
+            .await
+            .ok();
+    }
     let (bytes, window) =
         estimate_steady_window(&samples, duration).unwrap_or((bytes_total, duration));
     let up = throughput_summary(bytes, window, &mbps_samples);
 
-    let loaded_latency = lat_rx
-        .recv()
+    // Wait for latency results with a timeout to prevent indefinite hangs
+    let loaded_latency = tokio::time::timeout(Duration::from_secs(30), lat_rx.recv())
         .await
+        .context("timed out waiting for loaded latency results")?
         .context("loaded latency task ended unexpectedly")?;
 
     // Ensure the latency probe task has completed
